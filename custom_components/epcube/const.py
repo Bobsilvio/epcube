@@ -8,6 +8,14 @@ CONF_ENABLE_TOTAL = "enable_total"
 CONF_ENABLE_ANNUAL = "enable_annual"
 CONF_ENABLE_MONTHLY = "enable_monthly"
 
+# HTTP Configuration
+USER_AGENT = "ReservoirMonitoring/2.1.0 (iPhone; iOS 18.3.2; Scale/3.00)"
+HTTP_TIMEOUT = 30  # seconds
+HTTP_CONNECT_TIMEOUT = 10  # seconds
+
+# Retry Configuration
+MAX_RETRIES = 3
+RETRY_DELAY = 1  # seconds
 
 BASE_URLS = {
     "EU": "https://monitoring-eu.epcube.com/api",

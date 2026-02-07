@@ -24,6 +24,75 @@
   },
   "entity": {
     "sensor": {
+      "battery_daily_charge": {
+        "name": "Battery Daily Charge"
+      },
+      "battery_daily_discharge": {
+        "name": "Battery Daily Discharge"
+      },
+      "battery_energy_in": {
+        "name": "Battery Energy In"
+      },
+      "battery_energy_out": {
+        "name": "Battery Energy Out"
+      },
+      "gridpowera": {
+        "name": "Grid Power A"
+      },
+      "gridpowerb": {
+        "name": "Grid Power B"
+      },
+      "gridpowerc": {
+        "name": "Grid Power C"
+      },
+      "backuppowera": {
+        "name": "Backup Power A"
+      },
+      "backuppowerb": {
+        "name": "Backup Power B"
+      },
+      "backuppowerc": {
+        "name": "Backup Power C"
+      },
+      "existssg": {
+        "name": "Exist SSG"
+      },
+      "daylightmidpeaktimelistnonworkday": {
+        "name": "Day Light Mid Peak Time List Non Workday"
+      },
+      "daylightpeaktimelistnonworkday": {
+        "name": "Day Light Peak Time List Non Workday"
+      },
+      "offpeaktimelist": {
+        "name": "Off Peak Time List"
+      },
+      "peaktimelist": {
+        "name": "Peak Time List"
+      },
+      "midpeaktimelist": {
+        "name": "Mid Peak Time List"
+      },
+      "offpeaktimelistnonworkday": {
+        "name": "Off Peak Time List Non Workday"
+      },
+      "midpeaktimelistnonworkday": {
+        "name": "Mid Peak Time List Non Workday"
+      },
+      "daylightoffpeaktimelist": {
+        "name": "Day Light Off Peak Time List"
+      },
+      "daylightpeaktimelist": {
+        "name": "Day Light Peak Time List"
+      },
+      "peaktimelistnonworkday": {
+        "name": "Peak Time List Non Workday"
+      },
+      "daylightmidpeaktimelist": {
+        "name": "Day Light Mid Peak Time List"
+      },
+      "daylightoffpeaktimelistnonworkday": {
+        "name": "Day Light Off Peak Time List Non Workday"
+      },
       "devid": {
         "name": "EPCUBE ID"
       },

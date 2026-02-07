@@ -1,0 +1,64 @@
+set_tou_schedule:
+  name: Imposta Programmazione Tariffaria (TOU)
+  description: Configura gli orari di tariffazione (Time of Use) del dispositivo EP Cube
+  fields:
+    entry_id:
+      name: ID Entry
+      description: ID della configurazione epcube (opzionale, usa la prima se non specificato)
+      example: "abc12345"
+      required: false
+    peak_times:
+      name: Orari di Picco
+      description: Lista di intervalli orari di picco [[inizio1, fine1], [inizio2, fine2]]
+      example: "[[8, 13], [20, 23]]"
+      required: true
+    mid_peak_times:
+      name: Orari Semi-Picco
+      description: Lista di intervalli orari semi-picco (opzionale)
+      example: "[[13, 18]]"
+      required: false
+    off_peak_times:
+      name: Orari Fuori Picco
+      description: Lista di intervalli orari fuori picco (opzionale)
+      example: "[[0, 8], [18, 24]]"
+      required: false
+    daylight_peak_times:
+      name: Orari Luce - Picco
+      description: Orari di picco durante ora legale (opzionale)
+      example: "[[9, 14], [21, 24]]"
+      required: false
+    daylight_mid_peak_times:
+      name: Orari Luce - Semi-Picco
+      description: Orari semi-picco durante ora legale (opzionale)
+      example: "[[14, 19]]"
+      required: false
+    daylight_off_peak_times:
+      name: Orari Luce - Fuori Picco
+      description: Orari fuori picco durante ora legale (opzionale)
+      example: "[[0, 9], [19, 24]]"
+      required: false
+    active_week:
+      name: Giorni Attivi (Lavorativi)
+      description: "Giorni della settimana attivi per giorni lavorativi (1=Lunedì, 7=Domenica)"
+      example: "[1, 2, 3, 4, 5]"
+      required: false
+    active_week_non_workday:
+      name: Giorni Attivi (Non Lavorativi)
+      description: "Giorni della settimana attivi per giorni festivi (1=Lunedì, 7=Domenica)"
+      example: "[6, 7]"
+      required: false
+    daylight_saving_time:
+      name: Ora Legale
+      description: Abilita correzione per ora legale
+      example: "true"
+      required: false
+    ev_charger_reserve_soc:
+      name: SoC Caricabatterie EV
+      description: "Percentuale di carica riservata per caricabatterie EV (0-100)"
+      example: "50"
+      required: false
+    switch_to_mode:
+      name: Cambia Modalità
+      description: Passa automaticamente a modalità "Tariffazione" dopo aver impostato gli orari
+      example: "true"
+      required: false

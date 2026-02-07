@@ -23,6 +23,18 @@
   },
   "entity": {
     "sensor": {
+      "battery_daily_charge": {
+        "name": "Batteria Carica Giornaliera"
+      },
+      "battery_daily_discharge": {
+        "name": "Batteria Scarica Giornaliera"
+      },
+      "battery_energy_in": {
+        "name": "Batteria Energia Accumulata"
+      },
+      "battery_energy_out": {
+        "name": "Batteria Energia Ceduta"
+      },
       "devid": {
         "name": "ID EPCUBE"
       },

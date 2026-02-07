@@ -8,9 +8,15 @@ from homeassistant.helpers.entity_registry import async_get, RegistryEntryDisabl
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .state import EpCubeDataState
-from .const import DOMAIN, DEFAULT_SCAN_INTERVAL, CONF_ENABLE_TOTAL, CONF_ENABLE_ANNUAL, CONF_ENABLE_MONTHLY, get_base_url
+from .const import (
+    DOMAIN, DEFAULT_SCAN_INTERVAL, CONF_ENABLE_TOTAL, CONF_ENABLE_ANNUAL, 
+    CONF_ENABLE_MONTHLY, get_base_url, USER_AGENT, HTTP_TIMEOUT, 
+    HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY
+)
+from .translations import translate_field_name, translate_status_value
 import aiohttp
 import async_timeout
+import asyncio
 from datetime import timedelta, datetime, date
 
 import logging
@@ -47,10 +53,10 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         "gridpowerfailurenum", "activationdata", "warrantydata", "modeltype",
         "allowchargingxiagrid", "daylightsavingtime", "offgridpowersupplytime",
         "onlysave", "selfhelprate",
-        #Sensori di 'tempo di utilizzo'
-        "activeweek", "activeweeknonworkday", "activeweeknonworkday",
-        "daylightactiveWeek", "dayLightActiveweeknonWorkday", "daytype",
-        "isDayLightSaving", "weatherWatch",
+        # Sensori di 'tempo di utilizzo'
+        "activeweek", "activeweeknonworkday",
+        "daylightactiveweek", "daylightactiveweeknonworkday", "daytype",
+        "isdaylightsaving", "weatherwatch",
         "treenum", "coal",
     ]
 
@@ -58,12 +64,12 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         "defcreatetime", "fromcreatetime",
         "allowchargingxiagrid", "daylightsavingtime", "offgridpowersupplytime",
         "onlysave",
-        #disabilito i sensori 'tempo di utilizzo'
-        "activeweek", "activeweeknonworkday", "activeWeekNonWorkDay",
-        "daylightactiveweek", "dayLightActiveWeekNonWorkDay", "dayType",
-        "isDayLightSaving", "weatherWatch", "treenum", "coal",
+        # Disabilito i sensori 'tempo di utilizzo'
+        "activeweek", "activeweeknonworkday",
+        "daylightactiveweek", "daylightactiveweeknonworkday", "daytype",
+        "isdaylightsaving", "weatherwatch", "treenum", "coal",
         "defcreatetime", "fromcreatetime",
-        #Sensori ancora senza utilità o con valori uguali ad altri
+        # Sensori ancora senza utilità o con valori uguali ad altri
         "gridhalfpower", "solarflow", "backupflowpower",
     ]
 
@@ -146,8 +152,11 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
             entity_registry_enabled_default = True
 
         translation_key = f"{base_key}_{suffix_label}" if suffix_label else base_key
+        translated_name = translate_field_name(key)
+        
         sensor = SensorEntityDescription(
             key=key,
+            name=translated_name,
             translation_key=translation_key,
             native_unit_of_measurement=unit_of_measurement,
             device_class=device_class,
@@ -167,15 +176,36 @@ async def fetch_device_info(session, token, dev_id, region):
         "accept": "*/*",
         "accept-language": "it-IT",
         "accept-encoding": "gzip, deflate, br",
-        "user-agent": "ReservoirMonitoring/2.1.0 (iPhone; iOS 18.3.2; Scale/3.00)",
-        "authorization": f"Bearer {token}"
+        "user-agent": USER_AGENT,
+        "authorization": token
     }
 
-    async with session.get(url, headers=headers) as resp:
-        json_data = await resp.json()
-        raw_data = json_data.get("data", {})
-        normalized = {k.lower(): v for k, v in raw_data.items()}
-        return normalized
+    try:
+        with async_timeout.timeout(HTTP_TIMEOUT):
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    json_data = await resp.json()
+                    raw_data = json_data.get("data", {})
+                    normalized = {k.lower(): v for k, v in raw_data.items()}
+                    return normalized
+                elif resp.status == 401:
+                    _LOGGER.error("Token non valido o scaduto nel fetch device info (401)")
+                    return {}
+                elif resp.status >= 500:
+                    _LOGGER.warning("Errore server %s nel fetch device info", resp.status)
+                    return {}
+                else:
+                    _LOGGER.error("Errore HTTP %s nel fetch device info", resp.status)
+                    return {}
+    except asyncio.TimeoutError:
+        _LOGGER.error("Timeout nel fetch device info")
+        return {}
+    except aiohttp.ClientError as e:
+        _LOGGER.error("Errore connessione nel fetch device info: %s", e)
+        return {}
+    except Exception as e:
+        _LOGGER.exception("Errore inaspettato nel fetch device info: %s", e)
+        return {}
 
 async def fetch_epcube_stats(session, token, dev_id, date_str, scope_type, region):
     base_url = get_base_url(region)
@@ -184,23 +214,56 @@ async def fetch_epcube_stats(session, token, dev_id, date_str, scope_type, regio
         "accept": "*/*",
         "accept-language": "it-IT",
         "accept-encoding": "gzip, deflate, br",
-        "user-agent": "ReservoirMonitoring/2.1.0 (iPhone; iOS 18.3.2; Scale/3.00)",
-        "authorization": f"Bearer {token}"
+        "user-agent": USER_AGENT,
+        "authorization": token
     }
 
-    async with session.get(url, headers=headers) as resp:
-        json_data = await resp.json()
-        raw_data = json_data.get("data", {})
-        normalized = {k.lower(): v for k, v in raw_data.items()}
-        return normalized
+    try:
+        with async_timeout.timeout(HTTP_TIMEOUT):
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    json_data = await resp.json()
+                    raw_data = json_data.get("data", {})
+                    normalized = {k.lower(): v for k, v in raw_data.items()}
+                    return normalized
+                elif resp.status == 401:
+                    _LOGGER.error("Token non valido o scaduto nel fetch epcube stats (401)")
+                    return {}
+                elif resp.status >= 500:
+                    _LOGGER.warning("Errore server %s nel fetch epcube stats per %s", resp.status, date_str)
+                    return {}
+                else:
+                    _LOGGER.error("Errore HTTP %s nel fetch epcube stats", resp.status)
+                    return {}
+    except asyncio.TimeoutError:
+        _LOGGER.error("Timeout nel fetch epcube stats per %s", date_str)
+        return {}
+    except aiohttp.ClientError as e:
+        _LOGGER.error("Errore connessione nel fetch epcube stats: %s", e)
+        return {}
+    except Exception as e:
+        _LOGGER.exception("Errore inaspettato nel fetch epcube stats: %s", e)
+        return {}
 
 async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, hass, entry_id):
     config_entry = hass.data[DOMAIN][entry_id].get("config_entry")
     region = config_entry.data.get("region", "EU") if config_entry else "EU"
     base_url = get_base_url(region)
+    
     try:
-        with async_timeout.timeout(15):
+        with async_timeout.timeout(HTTP_TIMEOUT):
             async with session.get(url, headers=headers) as resp:
+                if resp.status == 401:
+                    raise UpdateFailed("Token non valido o scaduto")
+                elif resp.status == 403:
+                    raise UpdateFailed("Accesso negato all'API")
+                elif resp.status == 429:
+                    raise UpdateFailed("Rate limit raggiunto - riprova più tardi")
+                elif resp.status >= 500:
+                    raise UpdateFailed(f"Errore server {resp.status}")
+                elif resp.status != 200:
+                    raise UpdateFailed(f"Errore HTTP {resp.status}")
+                
                 if resp.content_type != "application/json":
                     raise UpdateFailed(f"Tipo MIME non gestito: {resp.content_type}")
 
@@ -209,27 +272,46 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                 full_data = {k.lower(): v for k, v in full_data_raw.items()}
                 real_dev_id = full_data.get("devid")
 
+                if not real_dev_id:
+                    raise UpdateFailed("Device ID non trovato nella risposta")
+
                 now = datetime.now()
                 year_str = str(now.year)
                 month_str = now.strftime("%Y-%m")
                 today_str = now.strftime("%Y-%m-%d")
 
-                live_data = await fetch_epcube_stats(session, token, real_dev_id, today_str, 1, region)
-                total_data = await fetch_epcube_stats(session, token, real_dev_id, year_str, 0, region)
-                annual_data = await fetch_epcube_stats(session, token, real_dev_id, year_str, 3, region)
-                monthly_data = await fetch_epcube_stats(session, token, real_dev_id, month_str, 2, region)
+                try:
+                    live_data = await fetch_epcube_stats(session, token, real_dev_id, today_str, 1, region)
+                    total_data = await fetch_epcube_stats(session, token, real_dev_id, year_str, 0, region)
+                    annual_data = await fetch_epcube_stats(session, token, real_dev_id, year_str, 3, region)
+                    monthly_data = await fetch_epcube_stats(session, token, real_dev_id, month_str, 2, region)
+                    device_info = await fetch_device_info(session, token, real_dev_id, region)
+                except Exception as e:
+                    _LOGGER.warning("Errore nel fetch dati supplementari: %s", e)
 
-                device_info = await fetch_device_info(session, token, real_dev_id, region)
+                # Fetch switch mode con error handling
+                try:
+                    switch_url = f"{base_url}/device/getSwitchMode?devId={real_dev_id}"
+                    with async_timeout.timeout(HTTP_TIMEOUT):
+                        async with session.get(switch_url, headers=headers) as switch_resp:
+                            if switch_resp.status == 200:
+                                switch_json = await switch_resp.json()
+                                switch_data = switch_json.get("data", {})
+                                for k, v in switch_data.items():
+                                    full_data[k.lower()] = v
+                            else:
+                                _LOGGER.warning("Errore nel fetch switch mode: HTTP %s", switch_resp.status)
+                except asyncio.TimeoutError:
+                    _LOGGER.warning("Timeout nel fetch switch mode")
+                except aiohttp.ClientError as e:
+                    _LOGGER.warning("Errore connessione nel fetch switch mode: %s", e)
+                except Exception as e:
+                    _LOGGER.warning("Errore inaspettato nel fetch switch mode: %s", e)
 
-                switch_url = f"{base_url}/device/getSwitchMode?devId={real_dev_id}"
-                async with session.get(switch_url, headers=headers) as switch_resp:
-                    switch_json = await switch_resp.json()
-                    switch_data = switch_json.get("data", {})
-                    for k, v in switch_data.items():
-                        full_data[k.lower()] = v
-
+                # Merge device info
                 for k in ["activationdata", "warrantydata", "modeltype", "batterycapacity"]:
-                    full_data[k] = device_info.get(k)
+                    if k in device_info:
+                        full_data[k] = device_info.get(k)
 
                 INCLUDED_LIVE_KEYS = {
                     "gridelectricity", "gridelectricityfrom", "gridelectricityto",
@@ -258,6 +340,12 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
 
                 return {"data": full_data}
 
+    except asyncio.TimeoutError:
+        raise UpdateFailed("Timeout nella lettura dei dati principali")
+    except aiohttp.ClientError as e:
+        raise UpdateFailed(f"Errore di connessione: {e}")
+    except UpdateFailed:
+        raise
     except Exception as err:
         raise UpdateFailed(f"Errore nell'aggiornamento dei dati: {err}")
 
@@ -291,6 +379,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EpCubeBatteryDailyChargeSensor(coordinator),
         EpCubeBatteryDailyDischargeSensor(coordinator),
         EpCubeBatteryPowerSensor(coordinator),
+        # Sensori TOU (Tariffazione)
+        EpCubeTouScheduleSensor(coordinator, "peak"),
+        EpCubeTouScheduleSensor(coordinator, "midpeak"),
+        EpCubeTouScheduleSensor(coordinator, "offpeak"),
+        EpCubeTouScheduleSensor(coordinator, "daylight_peak"),
+        EpCubeTouScheduleSensor(coordinator, "daylight_midpeak"),
+        EpCubeTouScheduleSensor(coordinator, "daylight_offpeak"),
+        EpCubeTouActiveWeeksSensor(coordinator, "workday"),
+        EpCubeTouActiveWeeksSensor(coordinator, "non_workday"),
     ]
     
 
@@ -534,3 +631,134 @@ class EpCubeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         )
 
         return value
+
+
+def _format_time_range(times_list):
+    """Formatta una lista di intervalli orari in stringa leggibile."""
+    if not times_list or len(times_list) == 0:
+        return "Non configurato"
+    
+    formatted = []
+    for interval in times_list:
+        if isinstance(interval, (list, tuple)) and len(interval) >= 2:
+            start, end = interval[0], interval[1]
+            formatted.append(f"{int(start):02d}:00-{int(end):02d}:00")
+    
+    return ", ".join(formatted) if formatted else "Non configurato"
+
+
+class EpCubeTouScheduleSensor(CoordinatorEntity, SensorEntity):
+    """Sensore che mostra gli orari TOU impostati."""
+    def __init__(self, coordinator, tou_type):
+        super().__init__(coordinator)
+        self.tou_type = tou_type
+        self.coordinator = coordinator
+        
+        # Mapping tipo TOU -> info
+        self.tou_info = {
+            "peak": {
+                "name": "Orari di Picco",
+                "unique_id": "epcube_tou_peak_times",
+                "key": "peaktimelist",
+                "icon": "mdi:flash"
+            },
+            "midpeak": {
+                "name": "Orari Semi-Picco",
+                "unique_id": "epcube_tou_midpeak_times",
+                "key": "midpeaktimelist",
+                "icon": "mdi:flash-outline"
+            },
+            "offpeak": {
+                "name": "Orari Fuori Picco",
+                "unique_id": "epcube_tou_offpeak_times",
+                "key": "offpeaktimelist",
+                "icon": "mdi:moon-waxing-crescent"
+            },
+            "daylight_peak": {
+                "name": "Orari Luce - Picco",
+                "unique_id": "epcube_tou_daylight_peak_times",
+                "key": "daylightpeaktimelist",
+                "icon": "mdi:sun-clock"
+            },
+            "daylight_midpeak": {
+                "name": "Orari Luce - Semi-Picco",
+                "unique_id": "epcube_tou_daylight_midpeak_times",
+                "key": "daylightmidpeaktimelist",
+                "icon": "mdi:sun-clock-outline"
+            },
+            "daylight_offpeak": {
+                "name": "Orari Luce - Fuori Picco",
+                "unique_id": "epcube_tou_daylight_offpeak_times",
+                "key": "daylightoffpeaktimelist",
+                "icon": "mdi:moon-new"
+            }
+        }
+        
+        info = self.tou_info[tou_type]
+        self._attr_name = info["name"]
+        self._attr_unique_id = info["unique_id"]
+        self._attr_icon = info["icon"]
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_device_class = None
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+    
+    @property
+    def native_value(self):
+        data = self.coordinator.data.get("data", {})
+        info = self.tou_info[self.tou_type]
+        times_list = data.get(info["key"], [])
+        return _format_time_range(times_list)
+
+
+class EpCubeTouActiveWeeksSensor(CoordinatorEntity, SensorEntity):
+    """Sensore che mostra i giorni attivi per la tariffazione."""
+    def __init__(self, coordinator, week_type):
+        super().__init__(coordinator)
+        self.week_type = week_type
+        self.coordinator = coordinator
+        
+        # Giorni della settimana
+        self.day_names = {
+            1: "Lunedì",
+            2: "Martedì",
+            3: "Mercoledì",
+            4: "Giovedì",
+            5: "Venerdì",
+            6: "Sabato",
+            7: "Domenica"
+        }
+        
+        if week_type == "workday":
+            self._attr_name = "Giorni Attivi - Lavorativi"
+            self._attr_unique_id = "epcube_tou_active_week"
+            self._attr_icon = "mdi:calendar-week"
+            self.key = "activeweek"
+        else:  # non_workday
+            self._attr_name = "Giorni Attivi - Festivi"
+            self._attr_unique_id = "epcube_tou_active_week_nonworkday"
+            self._attr_icon = "mdi:calendar-remove"
+            self.key = "activeweeknonworkday"
+        
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+    
+    @property
+    def native_value(self):
+        data = self.coordinator.data.get("data", {})
+        days = data.get(self.key, [])
+        
+        if not days or len(days) == 0:
+            return "Non configurato"
+        
+        day_names = [self.day_names.get(d, f"Giorno {d}") for d in days]
+        return ", ".join(day_names)

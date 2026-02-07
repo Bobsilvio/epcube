@@ -1,9 +1,10 @@
 from homeassistant.components.number import NumberEntity, NumberEntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import EntityCategory
-from .const import DOMAIN, get_base_url
+from .const import DOMAIN, get_base_url, USER_AGENT, HTTP_TIMEOUT, HTTP_CONNECT_TIMEOUT
 
 import aiohttp
+import asyncio
 import logging
 
 _LOGGER = logging.getLogger(__name__)
@@ -19,6 +20,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EpCubeDynamicSocNumber(coordinator, entry),
         EpCubeStaticSocNumber(coordinator, entry, "selfconsumptioinreservesoc", "SOC Autoconsumo", 0, 100),
         EpCubeStaticSocNumber(coordinator, entry, "backuppowerreservesoc", "SOC Backup", 50, 100),
+        # Number entities per TOU (Tariffazione)
+        EpCubeTouHourNumber(coordinator, entry, "peak_start", "TOU Picco Inizio", 0),
+        EpCubeTouHourNumber(coordinator, entry, "peak_end", "TOU Picco Fine", 0),
+        EpCubeTouHourNumber(coordinator, entry, "midpeak_start", "TOU Semi-Picco Inizio", 0),
+        EpCubeTouHourNumber(coordinator, entry, "midpeak_end", "TOU Semi-Picco Fine", 0),
+        EpCubeTouHourNumber(coordinator, entry, "offpeak_start", "TOU Fuori Picco Inizio", 0),
+        EpCubeTouHourNumber(coordinator, entry, "offpeak_end", "TOU Fuori Picco Fine", 0),
     ], True)
 
 
@@ -184,3 +192,66 @@ class EpCubeStaticSocNumber(CoordinatorEntity, NumberEntity):
                 else:
                     _LOGGER.info("SOC statico aggiornato correttamente. Risposta: %s", text)
                     await self.coordinator.async_request_refresh()
+
+class EpCubeTouHourNumber(CoordinatorEntity, NumberEntity):
+    """Number entity per configurare gli orari TOU (Time of Use)."""
+    
+    def __init__(self, coordinator, entry, hour_type, name, default_value):
+        super().__init__(coordinator)
+        self.entry = entry
+        self.coordinator = coordinator
+        self.region = entry.data.get("region", "EU")
+        self.base_url = get_base_url(self.region)
+        self.hour_type = hour_type
+        
+        self.entity_description = NumberEntityDescription(
+            key=f"epcube_tou_{hour_type}",
+            name=f"EPCUBE {name} (HH:00)",
+            icon="mdi:clock-outline",
+            entity_category=EntityCategory.CONFIG,
+        )
+        self._attr_unique_id = f"epcube_tou_{hour_type}_fix_range_v3"  # V3: Forza ricreazione entità
+        self._attr_step = 1
+        # Rimuove l'unità per evitare confusione
+        self._attr_native_unit_of_measurement = None
+        self._attr_mode = "slider"
+        self._current_value = default_value
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+            "entry_type": "service",
+            "configuration_url": f"{self.base_url}/"
+        }
+    
+    @property
+    def min_value(self):
+        """Min value dinamico per assicurare che HA lo legga correttamente."""
+        return 0
+    
+    @property
+    def max_value(self):
+        """Max value dinamico per assicurare che HA lo legga come 0-23."""
+        return 23
+    
+    @property
+    def native_value(self):
+        """Ritorna il valore attuale (salvato in memoria)."""
+        return self._current_value
+    
+    async def async_set_native_value(self, value: float):
+        """Salva il valore in memoria. Il service TOU leggerà questi valori."""
+        # Valida e clamma il valore nel range 0-23
+        int_value = int(value)
+        if int_value < 0:
+            int_value = 0
+            _LOGGER.warning("Valore %s clammato a 0 (minimo)", value)
+        elif int_value > 23:
+            int_value = 23
+            _LOGGER.warning("Valore %s clammato a 23 (massimo)", value)
+        
+        self._current_value = int_value
+        hora_formattata = f"{int_value:02d}:00"
+        _LOGGER.debug("Impostato %s = %d (%s)", self.hour_type, self._current_value, hora_formattata)
+        self.async_write_ha_state()
