@@ -61,10 +61,10 @@ class EpCubeDynamicSocNumber(CoordinatorEntity, NumberEntity):
             mode = ""
 
         if mode == "1":
-            self._attr_min_value = 0
+            self._attr_native_min_value = 0
         else:
-            self._attr_min_value = 50
-        self._attr_max_value = 100
+            self._attr_native_min_value = 50
+        self._attr_native_max_value = 100
 
     @property
     def _mode(self):
@@ -137,8 +137,8 @@ class EpCubeStaticSocNumber(CoordinatorEntity, NumberEntity):
             entity_category=EntityCategory.CONFIG,
         )
         self._attr_unique_id = f"epcube_soc_{self.original_key}"
-        self._attr_min_value = min_val
-        self._attr_max_value = max_val
+        self._attr_native_min_value = min_val
+        self._attr_native_max_value = max_val
         self._attr_step = 1
         self._attr_native_unit_of_measurement = "%"
         self._attr_mode = "slider"
@@ -212,6 +212,8 @@ class EpCubeTouHourNumber(CoordinatorEntity, NumberEntity):
         )
         self._attr_unique_id = f"epcube_tou_{hour_type}_fix_range_v3"  # V3: Forza ricreazione entità
         self._attr_step = 1
+        self._attr_native_min_value = 0
+        self._attr_native_max_value = 23
         # Rimuove l'unità per evitare confusione
         self._attr_native_unit_of_measurement = None
         self._attr_mode = "slider"
@@ -224,16 +226,6 @@ class EpCubeTouHourNumber(CoordinatorEntity, NumberEntity):
             "entry_type": "service",
             "configuration_url": f"{self.base_url}/"
         }
-    
-    @property
-    def min_value(self):
-        """Min value dinamico per assicurare che HA lo legga correttamente."""
-        return 0
-    
-    @property
-    def max_value(self):
-        """Max value dinamico per assicurare che HA lo legga come 0-23."""
-        return 23
     
     @property
     def native_value(self):
