@@ -1,6 +1,6 @@
 {
   "name": "epcube",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "Home Assistant custom integration for EPCUBE Energy solar monitoring",
   "keywords": [
     "home-assistant",

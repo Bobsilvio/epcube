@@ -137,6 +137,25 @@ FIELD_TRANSLATIONS = {
     "heatpumpsettingspermission": "Permesso Pompa Calore",
     "homeconnectauth": "Autenticazione Home Connect",
     "existssg": "Esiste SG",
+
+    # === Valuta ===
+    "unitdefault": "Unità Valuta",
+    "unitsmallest": "Unità Valuta Minima",
+    "unitmulti": "Moltiplicatore Valuta",
+    "earningyesterday": "Guadagno Ieri",
+
+    # === Informazioni da deviceList ===
+    "devicesystemtype": "Tipo Sistema",
+    "systemcapacity": "Capacità Sistema",
+    "batterytype": "Tipo Batteria (Modulo)",
+    "lastconnecttime": "Ultima Connessione",
+    "lat": "Latitudine",
+    "lon": "Longitudine",
+    "addressinfo": "Indirizzo Installazione",
+    "isparallel": "Sistema Parallelo",
+    "hybridnum": "Numero Ibridi",
+    "dynamicpriceauth": "Prezzo Dinamico Abilitato",
+    "softwareversion": "Versione Software",
 }
 
 # Modalità operative

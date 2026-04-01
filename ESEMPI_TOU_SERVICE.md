@@ -1,64 +1,60 @@
-# Esempi di utilizzo del service set_tou_schedule
+# Esempi di utilizzo dei service EP Cube
 
-# === ESEMPIO 1: Tariffazione semplice ===
-# Usa nel Developer Tools > Services in Home Assistant
-
-service: epcube.set_tou_schedule
-data:
-  peak_times:
-    - - 8
-      - 13
-    - - 20
-      - 23
-  mid_peak_times:
-    - - 13
-      - 18
-  off_peak_times:
-    - - 0
-      - 8
-    - - 18
-      - 20
-    - - 23
-      - 24
-  switch_to_mode: true
+> **Formato orari TOU**: ogni fascia è una stringa `"HH:MM_HH:MM_prezzo"`
+> Esempio: `"08:00_13:00_0.31"` = dalle 8:00 alle 13:00 al prezzo 0.31 €/kWh
 
 ---
 
-# === ESEMPIO 2: Tariffazione con Ora Legale ===
+## set_tou_schedule — Tariffazione (Mode 2)
+
+### ESEMPIO 1: Tariffazione semplice
+```yaml
 service: epcube.set_tou_schedule
 data:
   peak_times:
-    - - 8
-      - 13
-    - - 20
-      - 23
+    - "08:00_13:00_0.31"
+    - "20:00_23:00_0.31"
   mid_peak_times:
-    - - 13
-      - 18
+    - "13:00_18:00_0.25"
   off_peak_times:
-    - - 0
-      - 8
-    - - 18
-      - 20
+    - "00:00_08:00_0.15"
+    - "18:00_20:00_0.15"
+    - "23:00_24:00_0.15"
+  switch_to_mode: true
+```
+
+---
+
+### ESEMPIO 2: Tariffazione con Ora Legale
+```yaml
+service: epcube.set_tou_schedule
+data:
+  # Orari invernali
+  peak_times:
+    - "08:00_13:00_0.31"
+    - "20:00_23:00_0.31"
+  mid_peak_times:
+    - "13:00_18:00_0.25"
+  off_peak_times:
+    - "00:00_08:00_0.15"
+    - "18:00_20:00_0.15"
+  # Orari estivi (ora legale)
   daylight_peak_times:
-    - - 9
-      - 14
-    - - 21
-      - 24
+    - "09:00_14:00_0.31"
+    - "21:00_24:00_0.31"
   daylight_mid_peak_times:
-    - - 14
-      - 19
+    - "14:00_19:00_0.25"
   daylight_off_peak_times:
-    - - 0
-      - 9
-    - - 19
-      - 24
+    - "00:00_09:00_0.15"
+    - "19:00_21:00_0.15"
   daylight_saving_time: true
   switch_to_mode: true
+```
 
 ---
 
-# === ESEMPIO 3: In un'automazione YAML ===
+### ESEMPIO 3: Automazione — cambio stagionale automatico
+```yaml
 automation:
   - id: 'set_tou_winter'
     alias: 'Imposta Tariffazione Invernale'
@@ -72,67 +68,81 @@ automation:
       service: epcube.set_tou_schedule
       data:
         peak_times:
-          - [8, 13]
-          - [20, 23]
+          - "08:00_13:00_0.31"
+          - "20:00_23:00_0.31"
         mid_peak_times:
-          - [13, 18]
+          - "13:00_18:00_0.25"
         off_peak_times:
-          - [0, 8]
-          - [18, 20]
-          - [23, 24]
+          - "00:00_08:00_0.15"
+          - "18:00_20:00_0.15"
+          - "23:00_24:00_0.15"
         switch_to_mode: true
-        
+```
+
 ---
 
-# === ESEMPIO 4: Con template (da config.yaml) ===
-# Utile per utilizzare variabili o template
-
+### ESEMPIO 4: Tariffazione feriale vs festiva
+```yaml
 service: epcube.set_tou_schedule
-target: {}
 data:
-  peak_times: "{{ state_attr('input_text.peak_times', 'value') | from_json }}"
-  off_peak_times: "{{ state_attr('input_text.off_peak_times', 'value') | from_json }}"
-  switch_to_mode: "{{ state_attr('input_boolean.auto_switch_tou', 'value') }}"
+  # Giorni lavorativi
+  peak_times:
+    - "08:00_12:00_0.31"
+    - "15:00_18:00_0.31"
+    - "20:00_23:00_0.31"
+  off_peak_times:
+    - "00:00_08:00_0.15"
+    - "12:00_15:00_0.15"
+    - "18:00_20:00_0.15"
+    - "23:00_24:00_0.15"
+  active_week: [1, 2, 3, 4, 5]
+  # Giorni festivi — tutto fuori picco
+  off_peak_times_non_workday:
+    - "00:00_24:00_0.15"
+  active_week_non_workday: [6, 7]
+  switch_to_mode: true
+```
 
 ---
 
-# === ESEMPIO 5: Modalità Lavoro (Home Assistant UI) ===
-# Nel file automations.yaml della UI
-alias: Tariffazione Feriale
-description: Cambia gli orari di tariffazione per giorni feriali
-trigger:
-  - platform: time
-    at: "06:00:00"
-    weekday:
-      - mon
-      - tue
-      - wed
-      - thu
-      - fri
-condition: []
-action:
-  - service: epcube.set_tou_schedule
-    data:
-      peak_times:
-        - - 8
-          - 12
-        - - 15
-          - 18
-        - - 20
-          - 23
-      off_peak_times:
-        - - 0
-          - 8
-        - - 12
-          - 15
-        - - 18
-          - 20
-        - - 23
-          - 24
-      active_week:
-        - 1
-        - 2
-        - 3
-        - 4
-        - 5
-mode: single
+## set_operating_mode — Autoconsumo (Mode 1) e Backup (Mode 3)
+
+### ESEMPIO 5: Attiva modalità Backup
+```yaml
+service: epcube.set_operating_mode
+data:
+  mode: "3"
+  backup_power_reserve_soc: 54
+```
+
+### ESEMPIO 6: Attiva modalità Autoconsumo
+```yaml
+service: epcube.set_operating_mode
+data:
+  mode: "1"
+  self_consumption_reserve_soc: 5
+```
+
+### ESEMPIO 7: Automazione — Backup di notte, Autoconsumo di giorno
+```yaml
+automation:
+  - alias: "Backup di notte"
+    trigger:
+      platform: time
+      at: "22:00:00"
+    action:
+      service: epcube.set_operating_mode
+      data:
+        mode: "3"
+        backup_power_reserve_soc: 60
+
+  - alias: "Autoconsumo di giorno"
+    trigger:
+      platform: time
+      at: "06:00:00"
+    action:
+      service: epcube.set_operating_mode
+      data:
+        mode: "1"
+        self_consumption_reserve_soc: 5
+```

@@ -17,6 +17,7 @@ from .translations import translate_field_name, translate_status_value
 import aiohttp
 import async_timeout
 import asyncio
+import json
 from datetime import timedelta, datetime, date
 
 import logging
@@ -58,6 +59,17 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         "daylightactiveweek", "daylightactiveweeknonworkday", "daytype",
         "isdaylightsaving", "weatherwatch",
         "treenum", "coal",
+        # Metadati valuta
+        "unitdefault", "unitsmallest", "unitmulti",
+        # Tipo tariffazione e modalità speciali
+        "toutype", "systemspecialworkmode",
+        # Dispositivo
+        "devtype", "batterypacknum", "heatpumpsettingspermission", "homeconnectauth",
+        # Dati da deviceList
+        "devicesystemtype", "systemcapacity", "batterytype",
+        "lastconnecttime", "lat", "lon", "addressinfo",
+        "isparallel", "hybridnum", "dynamicpriceauth",
+        "softwareversion",
     ]
 
     disabled_by_default = [
@@ -68,9 +80,18 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         "activeweek", "activeweeknonworkday",
         "daylightactiveweek", "daylightactiveweeknonworkday", "daytype",
         "isdaylightsaving", "weatherwatch", "treenum", "coal",
-        "defcreatetime", "fromcreatetime",
-        # Sensori ancora senza utilità o con valori uguali ad altri
+        # Sensori con valori uguali ad altri o ridondanti
         "gridhalfpower", "solarflow", "backupflowpower",
+        "generatorpower", "generatorflowpower",  # alias di solarpower per questo modello
+        # Metadati valuta (non utili come sensori)
+        "unitdefault", "unitsmallest", "unitmulti",
+        # Diagnostici meno utili
+        "toutype", "systemspecialworkmode", "devtype",
+        "heatpumpsettingspermission", "homeconnectauth",
+        # Dati da deviceList — disabilitati di default (info statiche o private)
+        "lat", "lon", "addressinfo",
+        "isparallel", "hybridnum", "dynamicpriceauth",
+        "softwareversion",
     ]
 
     diagnostic_sensors = [s.lower() for s in diagnostic_sensors]
@@ -113,7 +134,9 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
                 state_class = SensorStateClass.MEASUREMENT
 
             
-        elif "flow" in base_key or "power" in base_key:
+        elif ("flow" in base_key or "power" in base_key) and base_key not in (
+            "gridpowerfailurenum", "offgridpowersupplytime"
+        ):
             device_class = SensorDeviceClass.POWER
             unit_of_measurement = UnitOfPower.WATT
             state_class = SensorStateClass.MEASUREMENT
@@ -207,6 +230,88 @@ async def fetch_device_info(session, token, dev_id, region):
         _LOGGER.exception("Errore inaspettato nel fetch device info: %s", e)
         return {}
 
+async def fetch_device_list(session, token, dev_id, region):
+    """Fetch deviceList e ritorna l'entry corrispondente a dev_id."""
+    base_url = get_base_url(region)
+    url = f"{base_url}/device/deviceList"
+    headers = {
+        "accept": "*/*",
+        "accept-language": "it-IT",
+        "accept-encoding": "gzip, deflate, br",
+        "user-agent": USER_AGENT,
+        "authorization": token
+    }
+
+    try:
+        with async_timeout.timeout(HTTP_TIMEOUT):
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    json_data = await resp.json()
+                    devices = json_data.get("data", [])
+                    for device in devices:
+                        if str(device.get("id")) == str(dev_id):
+                            return device
+                    _LOGGER.warning("Device %s non trovato in deviceList", dev_id)
+                    return {}
+                elif resp.status == 401:
+                    _LOGGER.error("Token non valido nel fetch deviceList (401)")
+                    return {}
+                elif resp.status >= 500:
+                    _LOGGER.warning("Errore server %s nel fetch deviceList", resp.status)
+                    return {}
+                else:
+                    _LOGGER.error("Errore HTTP %s nel fetch deviceList", resp.status)
+                    return {}
+    except asyncio.TimeoutError:
+        _LOGGER.error("Timeout nel fetch deviceList")
+        return {}
+    except aiohttp.ClientError as e:
+        _LOGGER.error("Errore connessione nel fetch deviceList: %s", e)
+        return {}
+    except Exception as e:
+        _LOGGER.exception("Errore inaspettato nel fetch deviceList: %s", e)
+        return {}
+
+
+async def fetch_switch_mode(session, token, dev_id, region):
+    """Fetch getSwitchMode e ritorna i dati normalizzati in lowercase."""
+    base_url = get_base_url(region)
+    url = f"{base_url}/device/getSwitchMode?devId={dev_id}"
+    headers = {
+        "accept": "*/*",
+        "accept-language": "it-IT",
+        "accept-encoding": "gzip, deflate, br",
+        "user-agent": USER_AGENT,
+        "authorization": token
+    }
+
+    try:
+        with async_timeout.timeout(HTTP_TIMEOUT):
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    json_data = await resp.json()
+                    raw_data = json_data.get("data", {})
+                    return {k.lower(): v for k, v in raw_data.items()}
+                elif resp.status == 401:
+                    _LOGGER.error("Token non valido nel fetch switch mode (401)")
+                    return {}
+                elif resp.status >= 500:
+                    _LOGGER.warning("Errore server %s nel fetch switch mode", resp.status)
+                    return {}
+                else:
+                    _LOGGER.error("Errore HTTP %s nel fetch switch mode", resp.status)
+                    return {}
+    except asyncio.TimeoutError:
+        _LOGGER.warning("Timeout nel fetch switch mode")
+        return {}
+    except aiohttp.ClientError as e:
+        _LOGGER.warning("Errore connessione nel fetch switch mode: %s", e)
+        return {}
+    except Exception as e:
+        _LOGGER.exception("Errore inaspettato nel fetch switch mode: %s", e)
+        return {}
+
+
 async def fetch_epcube_stats(session, token, dev_id, date_str, scope_type, region):
     base_url = get_base_url(region)
     url = f"{base_url}/device/queryDataElectricityV2?devId={dev_id}&queryDateStr={date_str}&scopeType={scope_type}"
@@ -280,42 +385,74 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                 month_str = now.strftime("%Y-%m")
                 today_str = now.strftime("%Y-%m-%d")
 
+                live_data = {}
+                total_data = {}
+                annual_data = {}
+                monthly_data = {}
+                device_info = {}
+                device_list_info = {}
+                switch_mode_data = {}
                 try:
-                    live_data = await fetch_epcube_stats(session, token, real_dev_id, today_str, 1, region)
-                    total_data = await fetch_epcube_stats(session, token, real_dev_id, year_str, 0, region)
-                    annual_data = await fetch_epcube_stats(session, token, real_dev_id, year_str, 3, region)
-                    monthly_data = await fetch_epcube_stats(session, token, real_dev_id, month_str, 2, region)
-                    device_info = await fetch_device_info(session, token, real_dev_id, region)
+                    (
+                        live_data,
+                        total_data,
+                        annual_data,
+                        monthly_data,
+                        device_info,
+                        device_list_info,
+                        switch_mode_data,
+                    ) = await asyncio.gather(
+                        fetch_epcube_stats(session, token, real_dev_id, today_str, 1, region),
+                        fetch_epcube_stats(session, token, real_dev_id, year_str, 0, region),
+                        fetch_epcube_stats(session, token, real_dev_id, year_str, 3, region),
+                        fetch_epcube_stats(session, token, real_dev_id, month_str, 2, region),
+                        fetch_device_info(session, token, real_dev_id, region),
+                        fetch_device_list(session, token, real_dev_id, region),
+                        fetch_switch_mode(session, token, real_dev_id, region),
+                        return_exceptions=False,
+                    )
                 except Exception as e:
                     _LOGGER.warning("Errore nel fetch dati supplementari: %s", e)
 
-                # Fetch switch mode con error handling
-                try:
-                    switch_url = f"{base_url}/device/getSwitchMode?devId={real_dev_id}"
-                    with async_timeout.timeout(HTTP_TIMEOUT):
-                        async with session.get(switch_url, headers=headers) as switch_resp:
-                            if switch_resp.status == 200:
-                                switch_json = await switch_resp.json()
-                                switch_data = switch_json.get("data", {})
-                                for k, v in switch_data.items():
-                                    full_data[k.lower()] = v
-                            else:
-                                _LOGGER.warning("Errore nel fetch switch mode: HTTP %s", switch_resp.status)
-                except asyncio.TimeoutError:
-                    _LOGGER.warning("Timeout nel fetch switch mode")
-                except aiohttp.ClientError as e:
-                    _LOGGER.warning("Errore connessione nel fetch switch mode: %s", e)
-                except Exception as e:
-                    _LOGGER.warning("Errore inaspettato nel fetch switch mode: %s", e)
+                # Merge switch mode — sovrascrive homeDeviceInfo per SoC e config TOU
+                for k, v in switch_mode_data.items():
+                    full_data[k] = v
 
-                # Merge device info
+                # Merge device info (userDeviceInfo)
                 for k in ["activationdata", "warrantydata", "modeltype", "batterycapacity"]:
                     if k in device_info:
                         full_data[k] = device_info.get(k)
 
+                # Merge deviceList — campi device fissi
+                DEVICE_LIST_KEYS = [
+                    "rtusn", "snitems", "softwareversion",
+                    "devicesystemtype", "systemcapacity", "batterytype",
+                    "lastconnecttime", "lat", "lon", "addressinfo",
+                    "isparallel", "hybridnum", "dynamicpriceauth",
+                ]
+                if device_list_info:
+                    normalized_dl = {k.lower(): v for k, v in device_list_info.items()}
+                    for k in DEVICE_LIST_KEYS:
+                        if k in normalized_dl and normalized_dl[k] is not None:
+                            full_data[k] = normalized_dl[k]
+
+                    # workParam: usato come fallback/integrazione per dati TOU/mode
+                    # se getSwitchMode ha già popolato i dati, workParam non sovrascrive
+                    work_param_str = device_list_info.get("workParam", "")
+                    if work_param_str:
+                        try:
+                            work_param = json.loads(work_param_str)
+                            for k, v in work_param.items():
+                                key_lower = k.lower()
+                                if key_lower not in full_data or full_data[key_lower] is None:
+                                    full_data[key_lower] = v
+                        except (json.JSONDecodeError, TypeError) as e:
+                            _LOGGER.warning("Errore nel parsing workParam: %s", e)
+
                 INCLUDED_LIVE_KEYS = {
                     "gridelectricity", "gridelectricityfrom", "gridelectricityto",
-                    "solarelectricity", "backupelectricity", "selfhelprate", "treenum", "coal",
+                    "solarelectricity", "backupelectricity", "nonbackupelectricity",
+                    "selfhelprate", "treenum", "coal",
                 }
 
                 for k, v in live_data.items():
@@ -379,6 +516,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EpCubeBatteryDailyChargeSensor(coordinator),
         EpCubeBatteryDailyDischargeSensor(coordinator),
         EpCubeBatteryPowerSensor(coordinator),
+        EpCubeTotalLoadPowerSensor(coordinator),
+        EpCubeTotalLoadEnergySensor(coordinator),
         # Sensori TOU (Tariffazione)
         EpCubeTouScheduleSensor(coordinator, "peak"),
         EpCubeTouScheduleSensor(coordinator, "midpeak"),
@@ -443,7 +582,7 @@ class EpCubeSensor(CoordinatorEntity, SensorEntity):
         if value is not None:
             if self.entity_description.device_class == SensorDeviceClass.POWER:
                 try:
-                    return round(float(value) * 10, 1)
+                    return round(float(value), 1)
                 except (ValueError, TypeError):
                     return None
         return value
@@ -466,7 +605,8 @@ class EpCubeBatteryChargeSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
     def __init__(self, coordinator):
         super().__init__(coordinator)
         self._attr_unique_id = "epcube_battery_energy_in"
-        self._attr_name = "Battery Energy In"
+        self._attr_translation_key = "battery_energy_in"
+        self._attr_has_entity_name = True
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -498,7 +638,8 @@ class EpCubeBatteryDischargeSensor(CoordinatorEntity, RestoreEntity, SensorEntit
     def __init__(self, coordinator):
         super().__init__(coordinator)
         self._attr_unique_id = "epcube_battery_energy_out"
-        self._attr_name = "Battery Energy Out"
+        self._attr_translation_key = "battery_energy_out"
+        self._attr_has_entity_name = True
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -530,7 +671,8 @@ class EpCubeBatteryDailyChargeSensor(CoordinatorEntity, RestoreEntity, SensorEnt
     def __init__(self, coordinator):
         super().__init__(coordinator)
         self._attr_unique_id = "epcube_battery_daily_charge"
-        self._attr_name = "Battery Daily Charge"
+        self._attr_translation_key = "battery_daily_charge"
+        self._attr_has_entity_name = True
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -566,7 +708,8 @@ class EpCubeBatteryDailyDischargeSensor(CoordinatorEntity, RestoreEntity, Sensor
     def __init__(self, coordinator):
         super().__init__(coordinator)
         self._attr_unique_id = "epcube_battery_daily_discharge"
-        self._attr_name = "Battery Daily Discharge"
+        self._attr_translation_key = "battery_daily_discharge"
+        self._attr_has_entity_name = True
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -600,7 +743,8 @@ class EpCubeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator):
         super().__init__(coordinator)
         self._attr_unique_id = "epcube_battery_power"
-        self._attr_name = "Battery Power (Live)"
+        self._attr_translation_key = "battery_power"
+        self._attr_has_entity_name = True
         self._attr_device_class = SensorDeviceClass.POWER
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
@@ -614,7 +758,7 @@ class EpCubeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         data = self.coordinator.data.get("data", {})
-        
+
         produzione = data.get("solarpower")
         consumo = data.get("backuppower")
         rete = data.get("gridtotalpower")
@@ -622,15 +766,74 @@ class EpCubeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         if produzione is None or consumo is None or rete is None:
             return None
 
-        power_kw = 10 * (produzione - consumo - abs(rete)) / 1000
+        # I valori sono in watt. Grid negativo = esportazione, positivo = importazione.
+        # Bilancio: batteria = solare + rete - carichi
+        non_backup = data.get("nonbackuppower") or 0
+        power_kw = (float(produzione) + float(rete) - float(consumo) - float(non_backup)) / 1000
         value = round(power_kw, 3)
 
         _LOGGER.debug(
-            "[EPCube BatteryPower] Produzione: %.1f W | Consumo: %.1f W | Grid: %.1f W → Batteria: %.3f kW",
-            produzione * 10, consumo * 10, rete * 10, value
+            "[EPCube BatteryPower] Solare: %.1f W | Backup: %.1f W | NonBackup: %.1f W | Grid: %.1f W → Batteria: %.3f kW",
+            produzione, consumo, non_backup, rete, value
         )
 
         return value
+
+
+class EpCubeTotalLoadPowerSensor(CoordinatorEntity, SensorEntity):
+    """Potenza istantanea totale dei carichi (backup + non-backup)."""
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = "epcube_total_load_power"
+        self._attr_name = "Potenza Consumo Totale"
+        self._attr_device_class = SensorDeviceClass.POWER
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement = UnitOfPower.WATT
+        self._attr_icon = "mdi:home-lightning-bolt"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data.get("data", {})
+        backup = data.get("backuppower")
+        nonbackup = data.get("nonbackuppower")
+        if backup is None and nonbackup is None:
+            return None
+        return round(float(backup or 0) + float(nonbackup or 0), 1)
+
+
+class EpCubeTotalLoadEnergySensor(CoordinatorEntity, SensorEntity):
+    """Energia totale consumata oggi (backup + non-backup)."""
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = "epcube_total_load_energy"
+        self._attr_name = "Energia Consumo Totale (Oggi)"
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_icon = "mdi:home-lightning-bolt-outline"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data.get("data", {})
+        backup = data.get("backupelectricity")
+        nonbackup = data.get("nonbackupelectricity")
+        if backup is None and nonbackup is None:
+            return None
+        return round(float(backup or 0) + float(nonbackup or 0), 3)
 
 
 def _format_time_range(times_list):

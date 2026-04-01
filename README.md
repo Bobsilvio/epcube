@@ -25,13 +25,13 @@ Custom Home Assistant integration for monitoring the EP Cube energy storage syst
 
 ## 🔧 Features
 
-- 📡 **Live data** updates every 5 seconds  
-- 📊 Access to **monthly, weekly, and yearly statistics**  
-  - Disabled by default to reduce load  
-  - Can be enabled individually or all at once via configuration  
+- 📡 **Live data** with configurable update interval (default: 30 seconds)
+- 📊 Access to **daily, monthly, and yearly statistics**
+  - Disabled by default to reduce load
+  - Can be enabled individually or all at once via configuration
 - 🎛️ **Modalità operative** (Autoconsumo, Tariffazione, Backup) con controllo da Home Assistant
 - 📅 **Service TOU** per gestire gli orari di tariffazione direttamente da Home Assistant
-- ⚙️ Built-in **configuration and diagnostic entities**  
+- ⚙️ Built-in **configuration and diagnostic entities**
 - 🧩 Fully integrated with Home Assistant UI (config flow, device info, icons)
 - 🔐 Requires a **valid Bearer token** (token generation via reverse engineering, [HERE](https://epcube-token.streamlit.app/))
 
@@ -39,11 +39,11 @@ Custom Home Assistant integration for monitoring the EP Cube energy storage syst
 
 ## 📦 Installation via HACS
 
-1. Open Home Assistant  
-2. Go to **HACS > Integrations > Custom repositories**  
-3. Add: `https://github.com/Bobsilvio/epcube` with type `Integration`  
-4. Search for `EPCube` and install it  
-5. Restart Home Assistant  
+1. Open Home Assistant
+2. Go to **HACS > Integrations > Custom repositories**
+3. Add: `https://github.com/Bobsilvio/epcube` with type `Integration`
+4. Search for `EPCube` and install it
+5. Restart Home Assistant
 6. Go to **Settings > Devices & Services** and add the integration
 
 ## 📦 Installation simple
@@ -53,7 +53,7 @@ Custom Home Assistant integration for monitoring the EP Cube energy storage syst
 
 ## ⚠️ Requirements
 
-- EP Cube account  
+- EP Cube account
 - Bearer token ([HERE](https://github.com/Bobsilvio/epcube-token))
 
 ---
@@ -65,75 +65,127 @@ L'integrazione supporta 3 modalità di funzionamento del dispositivo EP Cube:
 ### 1. **Autoconsumo** (Mode 1)
 - Massimizza l'autoconsumo dell'energia solare
 - La batteria carica quando c'è eccesso di solare
-- Configurable: SoC Autoconsumo Riservato (default: 15%)
+- Configurabile: SoC Riserva Autoconsumo (default: 5%)
 
 ### 2. **Tariffazione (Time of Use)** (Mode 2) ⭐
-- Configura diversi orari di prezzo (picco, semi-picco, fuori picco)
+- Configura diverse fasce orarie di prezzo (picco, semi-picco, fuori picco)
 - Supporta ora legale con orari differenti
-- **Gestibile direttamente da Home Assistant con il service dedicato**
+- Supporta fasce separate per giorni lavorativi e festivi
+- **Gestibile direttamente da Home Assistant con il service `set_tou_schedule`**
 
 ### 3. **Backup** (Mode 3)
 - Priorità al backup in caso di blackout
-- Configurable: SoC Backup Riservato (default: 50%)
+- Configurabile: SoC Backup Riservato (default: 50%)
 
 ---
 
-## 🔧 Service TOU (Time of Use)
+## 🔧 Service: Cambio Modalità Operativa
 
-### Cos'è?
+Il service `epcube.set_operating_mode` permette di passare tra **Autoconsumo** e **Backup**.
+Per la modalità **Tariffazione** usa invece `epcube.set_tou_schedule` (vedi sezione successiva).
 
-Il service `epcube.set_tou_schedule` permette di configurare gli orari di tariffazione del tuo EP Cube direttamente da Home Assistant, senza usare l'app ufficiale.
+### Parametri
+
+| Parametro | Tipo | Descrizione | Default |
+|-----------|------|-------------|---------|
+| `mode` | Stringa | Modalità: `"1"` = Autoconsumo, `"3"` = Backup | `"1"` |
+| `backup_power_reserve_soc` | Numero | SoC riserva backup % (solo mode=3) | `50` |
+| `self_consumption_reserve_soc` | Numero | SoC riserva autoconsumo % (solo mode=1) | `5` |
+| `entry_id` | Stringa | ID configurazione (auto se non specificato) | — |
+
+### Esempi
+
+```yaml
+# Attiva modalità Backup con SoC riserva 54%
+service: epcube.set_operating_mode
+data:
+  mode: "3"
+  backup_power_reserve_soc: 54
+```
+
+```yaml
+# Attiva modalità Autoconsumo con SoC riserva 5%
+service: epcube.set_operating_mode
+data:
+  mode: "1"
+  self_consumption_reserve_soc: 5
+```
+
+---
+
+## 📅 Service TOU (Time of Use)
+
+Il service `epcube.set_tou_schedule` permette di configurare gli orari di tariffazione del tuo EP Cube direttamente da Home Assistant.
+
+### Formato Orari
+
+Ogni fascia oraria è una **stringa** nel formato `"HH:MM_HH:MM_prezzo"`:
+
+```
+"08:00_13:00_0.31"   →  dalle 08:00 alle 13:00, prezzo 0.31 €/kWh
+"20:00_23:00_0.25"   →  dalle 20:00 alle 23:00, prezzo 0.25 €/kWh
+```
+
+> ⚠️ **Inizio e fine sono obbligatori.** Se manca uno dei due, il service restituisce errore.
 
 ### Utilizzo
 
-Accedi a **Developer Tools > Services** e chiama il service:
-
-```yaml
-service: epcube.set_tou_schedule
-data:
-  peak_times:              # Orari di Picco (obbligatorio)
-    - [8, 13]              # 08:00-13:00
-    - [20, 23]             # 20:00-23:00
-  mid_peak_times:          # Orari Semi-Picco (opzionale)
-    - [13, 18]
-  off_peak_times:          # Orari Fuori Picco (opzionale)
-    - [0, 8]
-    - [18, 20]
-    - [23, 24]
-  switch_to_mode: true     # Cambia automaticamente a modalità Tariffazione
-```
-
-### Parametri Disponibili
-
-| Parametro | Tipo | Descrizione | Obbligatorio |
-|-----------|------|-------------|--------------|
-| `peak_times` | Liste | Orari di picco | ✅ |
-| `mid_peak_times` | Liste | Orari semi-picco | ❌ |
-| `off_peak_times` | Liste | Orari fuori picco | ❌ |
-| `daylight_peak_times` | Liste | Orari picco (ora legale) | ❌ |
-| `daylight_mid_peak_times` | Liste | Orari semi-picco (ora legale) | ❌ |
-| `daylight_off_peak_times` | Liste | Orari fuori picco (ora legale) | ❌ |
-| `active_week` | Lista | Giorni lavorativi attivi (1-5=Lun-Ven) | ❌ |
-| `active_week_non_workday` | Lista | Giorni festivi attivi (6-7=Sab-Dom) | ❌ |
-| `daylight_saving_time` | Booleano | Abilita correzione ora legale | ❌ |
-| `ev_charger_reserve_soc` | Numero | SoC caricabatterie EV (0-100) | ❌ |
-| `entry_id` | Stringa | ID della configurazione (auto se non specificato) | ❌ |
-
-### Esempi Pratici
-
-#### Esempio 1: Tariffazione Invernale
 ```yaml
 service: epcube.set_tou_schedule
 data:
   peak_times:
-    - [8, 13]
-    - [20, 23]
+    - "08:00_13:00_0.31"
+    - "20:00_23:00_0.31"
   mid_peak_times:
-    - [13, 18]
+    - "13:00_18:00_0.25"
   off_peak_times:
-    - [0, 8]
-    - [18, 20]
-    - [23, 24]
+    - "00:00_08:00_0.15"
+    - "18:00_20:00_0.15"
+    - "23:00_24:00_0.15"
+  switch_to_mode: true
+```
+
+### Parametri Disponibili
+
+| Parametro | Tipo | Descrizione | Default |
+|-----------|------|-------------|---------|
+| `peak_times` | Lista stringhe | Fasce orarie picco | `[]` |
+| `mid_peak_times` | Lista stringhe | Fasce semi-picco | `[]` |
+| `off_peak_times` | Lista stringhe | Fasce fuori picco | `[]` |
+| `peak_times_non_workday` | Lista stringhe | Fasce picco (giorni festivi) | `[]` |
+| `mid_peak_times_non_workday` | Lista stringhe | Fasce semi-picco (festivi) | `[]` |
+| `off_peak_times_non_workday` | Lista stringhe | Fasce fuori picco (festivi) | `[]` |
+| `daylight_peak_times` | Lista stringhe | Fasce picco (ora legale) | `[]` |
+| `daylight_mid_peak_times` | Lista stringhe | Fasce semi-picco (ora legale) | `[]` |
+| `daylight_off_peak_times` | Lista stringhe | Fasce fuori picco (ora legale) | `[]` |
+| `active_week` | Lista interi | Giorni lavorativi (1=Lun … 5=Ven) | `[1,2,3,4,5]` |
+| `active_week_non_workday` | Lista interi | Giorni festivi (6=Sab, 7=Dom) | `[6,7]` |
+| `daylight_active_week` | Lista interi | Giorni lavorativi (ora legale) | `[1,2,3,4,5]` |
+| `daylight_active_week_non_workday` | Lista interi | Giorni festivi (ora legale) | `[6,7]` |
+| `tou_type` | Intero | Tipo tariffazione | `0` |
+| `self_consumption_reserve_soc` | Intero | SoC riserva autoconsumo % | `5` |
+| `allow_charging_from_grid` | Intero | Permetti ricarica da rete (0/1) | `0` |
+| `daylight_saving_time` | Booleano | Attiva supporto ora legale | `false` |
+| `switch_to_mode` | Booleano | Passa a modalità Tariffazione | `false` |
+| `entry_id` | Stringa | ID configurazione (auto se non specificato) | — |
+
+### Esempi Pratici
+
+#### Esempio 1: Tariffazione con fasce feriali e festive separate
+```yaml
+service: epcube.set_tou_schedule
+data:
+  peak_times:
+    - "08:00_13:00_0.31"
+    - "20:00_23:00_0.31"
+  off_peak_times:
+    - "00:00_08:00_0.15"
+    - "13:00_20:00_0.15"
+    - "23:00_24:00_0.15"
+  active_week: [1, 2, 3, 4, 5]
+  off_peak_times_non_workday:
+    - "00:00_24:00_0.15"
+  active_week_non_workday: [6, 7]
   switch_to_mode: true
 ```
 
@@ -142,18 +194,25 @@ data:
 service: epcube.set_tou_schedule
 data:
   # Orari invernali
-  peak_times: [[8, 13], [20, 23]]
-  off_peak_times: [[0, 8], [18, 20], [23, 24]]
-  
+  peak_times:
+    - "08:00_13:00_0.31"
+    - "20:00_23:00_0.31"
+  off_peak_times:
+    - "00:00_08:00_0.15"
+    - "13:00_20:00_0.15"
+    - "23:00_24:00_0.15"
   # Orari estivi (ora legale)
-  daylight_peak_times: [[9, 14], [21, 24]]
-  daylight_off_peak_times: [[0, 9], [19, 21], [24, 24]]
-  
+  daylight_peak_times:
+    - "09:00_14:00_0.31"
+    - "21:00_24:00_0.31"
+  daylight_off_peak_times:
+    - "00:00_09:00_0.15"
+    - "14:00_21:00_0.15"
   daylight_saving_time: true
   switch_to_mode: true
 ```
 
-#### Esempio 3: Automazione - Cambio Automatico Stagionale
+#### Esempio 3: Automazione — Cambio Automatico Stagionale
 ```yaml
 automation:
   - id: 'tou_winter_schedule'
@@ -167,82 +226,28 @@ automation:
     action:
       service: epcube.set_tou_schedule
       data:
-        peak_times: [[8, 13], [20, 23]]
-        off_peak_times: [[0, 8], [18, 20], [23, 24]]
+        peak_times:
+          - "08:00_13:00_0.31"
+          - "20:00_23:00_0.31"
+        off_peak_times:
+          - "00:00_08:00_0.15"
+          - "13:00_20:00_0.15"
+          - "23:00_24:00_0.15"
         switch_to_mode: true
-```
-
-#### Esempio 4: Script - Cambio Rapido da Pulsante
-```yaml
-script:
-  set_tou_peak_hours:
-    alias: "Imposta Tariffazione Picco"
-    sequence:
-      - service: epcube.set_tou_schedule
-        data:
-          peak_times: [[8, 13], [20, 23]]
-          off_peak_times: [[0, 8], [18, 20], [23, 24]]
-          switch_to_mode: true
-```
-
-#### Esempio 5: Usa i Number Entities per Configurare gli Orari
-Ora l'integrazione fornisce i number entities per impostare gli orari:
-- `number.epcube_tou_picco_inizio` (0-23, formato HH:00)
-- `number.epcube_tou_picco_fine` (0-23, formato HH:00)
-- `number.epcube_tou_semi_picco_inizio` (0-23, formato HH:00)
-- `number.epcube_tou_semi_picco_fine` (0-23, formato HH:00)
-- `number.epcube_tou_fuori_picco_inizio` (0-23, formato HH:00)
-- `number.epcube_tou_fuori_picco_fine` (0-23, formato HH:00)
-
-**Formato**: Inserisci un numero da 0 a 23 che rappresenta l'ora:
-- `0` = 00:00 (mezzanotte)
-- `8` = 08:00 (mattina)
-- `13` = 13:00 (pomeriggio)
-- `20` = 20:00 (sera)
-- `23` = 23:00 (quasi mezzanotte)
-
-**Automazione che usa i number entities:**
-```yaml
-automation:
-  - id: 'apply_tou_from_numbers'
-    alias: 'Applica TOU dai Number Entities'
-    trigger:
-      platform: event
-      event_type: call_service
-      event_data:
-        domain: epcube
-        service: apply_tou_from_ui
-    action:
-      - service: epcube.set_tou_schedule
-        data:
-          peak_times:
-            - - "{{ (states('number.epcube_tou_picco_inizio') | int(0)) }}"
-              - "{{ (states('number.epcube_tou_picco_fine') | int(1)) }}"
-          mid_peak_times:
-            - - "{{ (states('number.epcube_tou_semi_picco_inizio') | int(0)) }}"
-              - "{{ (states('number.epcube_tou_semi_picco_fine') | int(1)) }}"
-          off_peak_times:
-            - - "{{ (states('number.epcube_tou_fuori_picco_inizio') | int(0)) }}"
-              - "{{ (states('number.epcube_tou_fuori_picco_fine') | int(1)) }}"
-          switch_to_mode: true
 ```
 
 ---
 
-## 👁️ Visualizza gli Orari TOU Attuali
+## 👁️ Sensori Orari TOU
 
-L'integrazione crea automaticamente sensori diagnostici che mostrano gli orari configurati:
+L'integrazione crea automaticamente sensori diagnostici che mostrano le fasce orarie configurate:
 
-- **Orari di Picco**: `sensor.epcube_orari_di_picco`
-- **Orari Semi-Picco**: `sensor.epcube_orari_semi_picco`
-- **Orari Fuori Picco**: `sensor.epcube_orari_fuori_picco`
-- **Orari Luce - Picco**: `sensor.epcube_orari_luce_picco`
-- **Orari Luce - Semi-Picco**: `sensor.epcube_orari_luce_semi_picco`
-- **Orari Luce - Fuori Picco**: `sensor.epcube_orari_luce_fuori_picco`
-- **Giorni Attivi (Lavorativi)**: `sensor.epcube_giorni_attivi_lavorativi`
-- **Giorni Attivi (Festivi)**: `sensor.epcube_giorni_attivi_festivi`
-
-Visualizza questi sensori nella dashboard di Home Assistant per controllare sempre la configurazione TOU attuale!
+- `sensor.epcube_orari_picco`
+- `sensor.epcube_orari_semi_picco`
+- `sensor.epcube_orari_fuori_picco`
+- `sensor.epcube_orari_luce_picco`
+- `sensor.epcube_orari_luce_semi_picco`
+- `sensor.epcube_orari_luce_fuori_picco`
 
 ---
 
@@ -259,17 +264,20 @@ Visualizza questi sensori nella dashboard di Home Assistant per controllare semp
 ## 📊 Sensori Disponibili
 
 L'integrazione crea automaticamente sensori per:
-- **Battery**: SoC, Energia in/out (totale e giornaliera)
-- **Solar**: Potenza, Energia (AC/DC)
-- **Grid**: Potenza, Energia (ricevuta/ceduta)
-- **Backup**: Potenza, Energia
+- **Batteria**: SoC, Energia in/out (totale e giornaliera), potenza istantanea
+- **Fotovoltaico**: Potenza, Energia (AC/DC)
+- **Rete**: Potenza, Energia (prelevata/immessa)
+- **Carichi Backup**: Potenza, Energia
+- **Carichi Principali**: Potenza, Energia
 - **EV**: Potenza, Energia
-- **Generator**: Potenza, Energia
-- **Statistics**: Alberi piantati, CO₂ risparmiata
+- **Generatore**: Potenza, Energia
+- **Statistiche**: Alberi equivalenti, CO₂ risparmiata
+- **Configurazione TOU**: Fasce orarie, giorni attivi, SoC riserve
+- **Diagnostica**: Stato sistema, firmware, connettività
 
 ---
 
 ## 📜 Disclaimer
 
-This project is not affiliated with or endorsed by EP Cube or Canadian Solar.  
+This project is not affiliated with or endorsed by EP Cube or Canadian Solar.
 Use at your own risk. The API used is not officially documented or supported.
