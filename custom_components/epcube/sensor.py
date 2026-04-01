@@ -688,14 +688,17 @@ class EpCubeBatteryDailyChargeSensor(CoordinatorEntity, RestoreEntity, SensorEnt
         last_state = await self.async_get_last_state()
         state_obj = self.coordinator.hass.data[DOMAIN][self.coordinator.config_entry.entry_id]["state"]
 
-        if state_obj.last_reset != date.today():
-            state_obj.daily_in = 0.0
-            state_obj.last_reset = date.today()
-        elif last_state is not None:
+        if (
+            last_state is not None
+            and last_state.state not in (None, "unknown", "unavailable")
+            and dt_util.as_local(last_state.last_changed).date() == date.today()
+        ):
             try:
                 state_obj.daily_in = float(last_state.state)
             except ValueError:
                 state_obj.daily_in = 0.0
+        else:
+            state_obj.daily_in = 0.0
 
     @property
     def native_value(self):
@@ -725,14 +728,17 @@ class EpCubeBatteryDailyDischargeSensor(CoordinatorEntity, RestoreEntity, Sensor
         last_state = await self.async_get_last_state()
         state_obj = self.coordinator.hass.data[DOMAIN][self.coordinator.config_entry.entry_id]["state"]
 
-        if state_obj.last_reset != date.today():
-            state_obj.daily_out = 0.0
-            state_obj.last_reset = date.today()
-        elif last_state is not None:
+        if (
+            last_state is not None
+            and last_state.state not in (None, "unknown", "unavailable")
+            and dt_util.as_local(last_state.last_changed).date() == date.today()
+        ):
             try:
                 state_obj.daily_out = float(last_state.state)
             except ValueError:
                 state_obj.daily_out = 0.0
+        else:
+            state_obj.daily_out = 0.0
 
     @property
     def native_value(self):
