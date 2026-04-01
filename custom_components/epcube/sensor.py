@@ -70,6 +70,21 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         "lastconnecttime", "lat", "lon", "addressinfo",
         "isparallel", "hybridnum", "dynamicpriceauth",
         "softwareversion",
+        # Info dispositivo statiche (spec, connettività, identificatori)
+        "batterycapacity", "signallevel", "isonline", "networking",
+        "existssg", "snitems", "rtusn",
+        # Valori economici (non dati energetici)
+        "earningyesterday", "hasvalue",
+    ]
+
+    config_sensors = [
+        # Orari TOU — giorni lavorativi
+        "peaktimelist", "midpeaktimelist", "offpeaktimelist",
+        # Orari TOU — giorni festivi/weekend
+        "peaktimelistnonworkday", "midpeaktimelistnonworkday", "offpeaktimelistnonworkday",
+        # Orari TOU — ora legale
+        "daylightpeaktimelist", "daylightmidpeaktimelist", "daylightoffpeaktimelist",
+        "daylightpeaktimelistnonworkday", "daylightmidpeaktimelistnonworkday", "daylightoffpeaktimelistnonworkday",
     ]
 
     disabled_by_default = [
@@ -95,6 +110,7 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
     ]
 
     diagnostic_sensors = [s.lower() for s in diagnostic_sensors]
+    config_sensors = [s.lower() for s in config_sensors]
     disabled_by_default = [s.lower() for s in disabled_by_default]
 
     disabled_by_variant = {
@@ -117,7 +133,9 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         if suffix_label in disabled_by_variant.get(base_key, []):
             continue
 
-        if base_key in diagnostic_sensors:
+        if base_key in config_sensors:
+            entity_category = EntityCategory.CONFIG
+        elif base_key in diagnostic_sensors:
             entity_category = EntityCategory.DIAGNOSTIC
 
         #ectricity = kWh
@@ -135,7 +153,8 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
 
             
         elif ("flow" in base_key or "power" in base_key) and base_key not in (
-            "gridpowerfailurenum", "offgridpowersupplytime"
+            "gridpowerfailurenum", "offgridpowersupplytime",
+            "backuppowerreservesoc",
         ):
             device_class = SensorDeviceClass.POWER
             unit_of_measurement = UnitOfPower.WATT
@@ -148,6 +167,9 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
             if base_key == "batterysoc":
                 device_class = SensorDeviceClass.BATTERY
                 entity_category = None
+            elif base_key in ("backuppowerreservesoc", "selfconsumptioinreservesoc", "evchargerreservesoc"):
+                device_class = None
+                entity_category = EntityCategory.CONFIG
             else:
                 device_class = None
                 entity_category = EntityCategory.DIAGNOSTIC
@@ -156,6 +178,11 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
             device_class = None
             unit_of_measurement = None
             state_class = None
+
+        # Nei contesti statistici (_total/_annual/_monthly) i campi "power"/"flow"
+        # sono sempre 0 (placeholder vuoti dell'API) — non creare sensori inutili
+        if device_class == SensorDeviceClass.POWER and suffix_label in ("total", "annual", "monthly"):
+            continue
 
         if base_key == "batterysoc":
             entity_registry_enabled_default = True
@@ -907,7 +934,7 @@ class EpCubeTouScheduleSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = info["name"]
         self._attr_unique_id = info["unique_id"]
         self._attr_icon = info["icon"]
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_entity_category = EntityCategory.CONFIG
         self._attr_device_class = None
         self._attr_device_info = {
             "identifiers": {("epcube", "epcube_device")},
@@ -915,7 +942,7 @@ class EpCubeTouScheduleSensor(CoordinatorEntity, SensorEntity):
             "manufacturer": "CanadianSolar",
             "model": "EPCUBE",
         }
-    
+
     @property
     def native_value(self):
         data = self.coordinator.data.get("data", {})
@@ -953,14 +980,14 @@ class EpCubeTouActiveWeeksSensor(CoordinatorEntity, SensorEntity):
             self._attr_icon = "mdi:calendar-remove"
             self.key = "activeweeknonworkday"
         
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_entity_category = EntityCategory.CONFIG
         self._attr_device_info = {
             "identifiers": {("epcube", "epcube_device")},
             "name": "EPCUBE",
             "manufacturer": "CanadianSolar",
             "model": "EPCUBE",
         }
-    
+
     @property
     def native_value(self):
         data = self.coordinator.data.get("data", {})

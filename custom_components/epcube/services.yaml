@@ -1,6 +1,10 @@
 set_tou_schedule:
   name: Imposta Programmazione Tariffaria (TOU)
-  description: Configura gli orari di tariffazione (Time of Use) del dispositivo EP Cube
+  description: >
+    Configura gli orari di tariffazione (Time of Use) del dispositivo EP Cube.
+    Ogni fascia oraria è una stringa nel formato "HH:MM_HH:MM_prezzo"
+    (es. "08:00_13:00_0.31" = dalle 08:00 alle 13:00 a 0.31 €/kWh).
+    Inizio e fine sono entrambi obbligatori.
   fields:
     entry_id:
       name: ID Entry
@@ -8,57 +12,189 @@ set_tou_schedule:
       example: "abc12345"
       required: false
     peak_times:
-      name: Orari di Picco
-      description: Lista di intervalli orari di picco [[inizio1, fine1], [inizio2, fine2]]
-      example: "[[8, 13], [20, 23]]"
-      required: true
+      name: Orari di Picco (Giorni Lavorativi)
+      description: >
+        Lista fasce orarie di picco per giorni lavorativi.
+        Formato: "HH:MM_HH:MM_prezzo" — es. "08:00_13:00_0.31"
+      example: '["08:00_13:00_0.31", "20:00_23:00_0.31"]'
+      required: false
+      selector:
+        object:
     mid_peak_times:
-      name: Orari Semi-Picco
-      description: Lista di intervalli orari semi-picco (opzionale)
-      example: "[[13, 18]]"
+      name: Orari Semi-Picco (Giorni Lavorativi)
+      description: >
+        Lista fasce orarie semi-picco per giorni lavorativi.
+        Formato: "HH:MM_HH:MM_prezzo" — es. "13:00_18:00_0.25"
+      example: '["13:00_18:00_0.25"]'
       required: false
+      selector:
+        object:
     off_peak_times:
-      name: Orari Fuori Picco
-      description: Lista di intervalli orari fuori picco (opzionale)
-      example: "[[0, 8], [18, 24]]"
+      name: Orari Fuori Picco (Giorni Lavorativi)
+      description: >
+        Lista fasce orarie fuori picco per giorni lavorativi.
+        Formato: "HH:MM_HH:MM_prezzo" — es. "00:00_08:00_0.15"
+      example: '["00:00_08:00_0.15", "18:00_20:00_0.15", "23:00_24:00_0.15"]'
       required: false
-    daylight_peak_times:
-      name: Orari Luce - Picco
-      description: Orari di picco durante ora legale (opzionale)
-      example: "[[9, 14], [21, 24]]"
-      required: false
-    daylight_mid_peak_times:
-      name: Orari Luce - Semi-Picco
-      description: Orari semi-picco durante ora legale (opzionale)
-      example: "[[14, 19]]"
-      required: false
-    daylight_off_peak_times:
-      name: Orari Luce - Fuori Picco
-      description: Orari fuori picco durante ora legale (opzionale)
-      example: "[[0, 9], [19, 24]]"
-      required: false
+      selector:
+        object:
     active_week:
-      name: Giorni Attivi (Lavorativi)
-      description: "Giorni della settimana attivi per giorni lavorativi (1=Lunedì, 7=Domenica)"
+      name: Giorni Lavorativi
+      description: "Giorni della settimana per gli orari lavorativi (1=Lun, 2=Mar, 3=Mer, 4=Gio, 5=Ven, 6=Sab, 7=Dom). Default: [1,2,3,4,5]"
       example: "[1, 2, 3, 4, 5]"
       required: false
+      selector:
+        object:
+    peak_times_non_workday:
+      name: Orari di Picco (Giorni Festivi/Weekend)
+      description: >
+        Lista fasce orarie di picco per giorni festivi/weekend.
+        Formato: "HH:MM_HH:MM_prezzo"
+      example: '["09:00_13:00_0.31"]'
+      required: false
+      selector:
+        object:
+    mid_peak_times_non_workday:
+      name: Orari Semi-Picco (Giorni Festivi/Weekend)
+      description: >
+        Lista fasce orarie semi-picco per giorni festivi/weekend.
+        Formato: "HH:MM_HH:MM_prezzo"
+      example: '["13:00_18:00_0.25"]'
+      required: false
+      selector:
+        object:
+    off_peak_times_non_workday:
+      name: Orari Fuori Picco (Giorni Festivi/Weekend)
+      description: >
+        Lista fasce orarie fuori picco per giorni festivi/weekend.
+        Formato: "HH:MM_HH:MM_prezzo" — es. "00:00_24:00_0.15" per tutto il giorno
+      example: '["00:00_24:00_0.15"]'
+      required: false
+      selector:
+        object:
     active_week_non_workday:
-      name: Giorni Attivi (Non Lavorativi)
-      description: "Giorni della settimana attivi per giorni festivi (1=Lunedì, 7=Domenica)"
+      name: Giorni Festivi/Weekend
+      description: "Giorni della settimana per gli orari festivi (1=Lun ... 7=Dom). Default: [6,7]"
       example: "[6, 7]"
       required: false
+      selector:
+        object:
+    daylight_peak_times:
+      name: Orari Picco - Ora Legale (Lavorativi)
+      description: "Fasce picco per ora legale, giorni lavorativi. Formato: \"HH:MM_HH:MM_prezzo\""
+      example: '["09:00_14:00_0.31", "21:00_24:00_0.31"]'
+      required: false
+      selector:
+        object:
+    daylight_mid_peak_times:
+      name: Orari Semi-Picco - Ora Legale (Lavorativi)
+      description: "Fasce semi-picco per ora legale, giorni lavorativi. Formato: \"HH:MM_HH:MM_prezzo\""
+      example: '["14:00_19:00_0.25"]'
+      required: false
+      selector:
+        object:
+    daylight_off_peak_times:
+      name: Orari Fuori Picco - Ora Legale (Lavorativi)
+      description: "Fasce fuori picco per ora legale, giorni lavorativi. Formato: \"HH:MM_HH:MM_prezzo\""
+      example: '["00:00_09:00_0.15", "19:00_21:00_0.15"]'
+      required: false
+      selector:
+        object:
+    daylight_active_week:
+      name: Giorni Lavorativi - Ora Legale
+      description: "Giorni lavorativi per gli orari ora legale. Default: [1,2,3,4,5]"
+      example: "[1, 2, 3, 4, 5]"
+      required: false
+      selector:
+        object:
+    daylight_active_week_non_workday:
+      name: Giorni Festivi - Ora Legale
+      description: "Giorni festivi per gli orari ora legale. Default: [6,7]"
+      example: "[6, 7]"
+      required: false
+      selector:
+        object:
     daylight_saving_time:
       name: Ora Legale
-      description: Abilita correzione per ora legale
+      description: Abilita supporto ora legale (usa daylight_* per gli orari estivi)
       example: "true"
       required: false
-    ev_charger_reserve_soc:
-      name: SoC Caricabatterie EV
-      description: "Percentuale di carica riservata per caricabatterie EV (0-100)"
-      example: "50"
+      selector:
+        boolean:
+    tou_type:
+      name: Tipo Tariffazione
+      description: Tipo di tariffazione (default 0)
+      example: "0"
       required: false
+      selector:
+        number:
+          min: 0
+          max: 10
+    self_consumption_reserve_soc:
+      name: SoC Riserva Autoconsumo
+      description: "Percentuale SoC minima di riserva autoconsumo (default: 5)"
+      example: "5"
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    allow_charging_from_grid:
+      name: Permetti Ricarica da Rete
+      description: "Consenti la ricarica della batteria dalla rete elettrica. 1=sì, 0=no. Default: mantieni impostazione attuale del dispositivo."
+      example: "1"
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 1
     switch_to_mode:
-      name: Cambia Modalità
-      description: Passa automaticamente a modalità "Tariffazione" dopo aver impostato gli orari
+      name: Attiva Modalità Tariffazione
+      description: Passa automaticamente alla modalità Tariffazione (TOU) dopo aver impostato gli orari
       example: "true"
       required: false
+      selector:
+        boolean:
+
+set_operating_mode:
+  name: Cambia Modalità Operativa
+  description: Cambia la modalità operativa del dispositivo EP Cube (Autoconsumo o Backup). Per la modalità Tariffazione usa set_tou_schedule.
+  fields:
+    entry_id:
+      name: ID Entry
+      description: ID della configurazione epcube (opzionale, usa la prima se non specificato)
+      example: "abc12345"
+      required: false
+    mode:
+      name: Modalità
+      description: "\"1\" = Autoconsumo, \"3\" = Backup"
+      example: '"3"'
+      required: true
+      selector:
+        select:
+          options:
+            - label: "Autoconsumo (1)"
+              value: "1"
+            - label: "Backup (3)"
+              value: "3"
+    backup_power_reserve_soc:
+      name: SoC Riserva Backup
+      description: "Percentuale SoC riservata per il backup (solo mode=3, default: 50)"
+      example: "54"
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    self_consumption_reserve_soc:
+      name: SoC Riserva Autoconsumo
+      description: "Percentuale SoC minima autoconsumo (solo mode=1, default: 5)"
+      example: "5"
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"

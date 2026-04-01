@@ -164,7 +164,7 @@ data:
 | `daylight_active_week_non_workday` | Lista interi | Giorni festivi (ora legale) | `[6,7]` |
 | `tou_type` | Intero | Tipo tariffazione | `0` |
 | `self_consumption_reserve_soc` | Intero | SoC riserva autoconsumo % | `5` |
-| `allow_charging_from_grid` | Intero | Permetti ricarica da rete (0/1) | `0` |
+| `allow_charging_from_grid` | Intero | Permetti ricarica da rete (0/1) | mantiene impostazione attuale del dispositivo |
 | `daylight_saving_time` | Booleano | Attiva supporto ora legale | `false` |
 | `switch_to_mode` | Booleano | Passa a modalità Tariffazione | `false` |
 | `entry_id` | Stringa | ID configurazione (auto se non specificato) | — |

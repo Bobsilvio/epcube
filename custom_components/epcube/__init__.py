@@ -187,9 +187,20 @@ async def async_set_tou_schedule(hass: HomeAssistant, call):
     # Se switch_to_mode è False, usa onlySave="1" per salvare senza cambiare modalità
     only_save = "0" if switch_to_mode else "1"
 
+    # allowChargingXiaGrid: preserva il valore attuale del dispositivo se non specificato
+    allow_charging_from_grid = call.data.get("allow_charging_from_grid")
+    if allow_charging_from_grid is None:
+        # Legge il valore corrente dal coordinator (getSwitchMode normalizzato in lowercase)
+        current_data = coordinator.data.get("data", {}) if coordinator.data else {}
+        allow_charging_str = str(current_data.get("allowchargingxiagrid", "1"))
+    else:
+        allow_charging_str = str(allow_charging_from_grid)
+
     # activeWeek deve essere array di stringhe (es. ["1","2","3","4","5"])
     active_week_str = [str(d) for d in active_week]
     active_week_non_workday_str = [str(d) for d in active_week_non_workday]
+    daylight_active_week_str = [str(d) for d in call.data.get("daylight_active_week", [1, 2, 3, 4, 5])]
+    daylight_active_week_non_workday_str = [str(d) for d in call.data.get("daylight_active_week_non_workday", [6, 7])]
 
     # Prepara il payload
     # Formato orari TOU: lista di stringhe "HH:MM_HH:MM_prezzo" (es. "08:00_12:00_0.31")
@@ -210,11 +221,11 @@ async def async_set_tou_schedule(hass: HomeAssistant, call):
         "dayLightOffPeakTimeList": daylight_off_peak_times,
         "activeWeek": active_week_str,
         "activeWeekNonWorkDay": active_week_non_workday_str,
-        "dayLightActiveWeek": call.data.get("daylight_active_week", [1, 2, 3, 4, 5]),
-        "dayLightActiveWeekNonWorkDay": call.data.get("daylight_active_week_non_workday", [6, 7]),
+        "dayLightActiveWeek": daylight_active_week_str,
+        "dayLightActiveWeekNonWorkDay": daylight_active_week_non_workday_str,
         "dayLightSavingTime": call.data.get("daylight_saving_time", False),
         "selfConsumptioinReserveSoc": str(call.data.get("self_consumption_reserve_soc", 5)),
-        "allowChargingXiaGrid": str(call.data.get("allow_charging_from_grid", 0)),
+        "allowChargingXiaGrid": allow_charging_str,
     }
     
     _LOGGER.info("Invio configurazione TOU al dispositivo: %s", payload)
