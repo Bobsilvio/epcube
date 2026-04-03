@@ -169,7 +169,7 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
                 entity_category = None
             elif base_key in ("backuppowerreservesoc", "selfconsumptioinreservesoc", "evchargerreservesoc"):
                 device_class = None
-                entity_category = EntityCategory.CONFIG
+                entity_category = EntityCategory.DIAGNOSTIC
             else:
                 device_class = None
                 entity_category = EntityCategory.DIAGNOSTIC
