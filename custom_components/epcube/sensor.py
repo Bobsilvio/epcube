@@ -609,7 +609,7 @@ class EpCubeSensor(CoordinatorEntity, SensorEntity):
         if value is not None:
             if self.entity_description.device_class == SensorDeviceClass.POWER:
                 try:
-                    return round(float(value), 1)
+                    return round(float(value) * 10, 1)
                 except (ValueError, TypeError):
                     return None
         return value
@@ -799,15 +799,16 @@ class EpCubeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         if produzione is None or consumo is None or rete is None:
             return None
 
-        # I valori sono in watt. Grid negativo = esportazione, positivo = importazione.
+        # I valori API sono in unità ×10W — vanno moltiplicati × 10 per ottenere Watt.
+        # Grid negativo = esportazione, positivo = importazione.
         # Bilancio: batteria = solare + rete - carichi
         non_backup = data.get("nonbackuppower") or 0
-        power_kw = (float(produzione) + float(rete) - float(consumo) - float(non_backup)) / 1000
+        power_kw = 10 * (float(produzione) + float(rete) - float(consumo) - float(non_backup)) / 1000
         value = round(power_kw, 3)
 
         _LOGGER.debug(
             "[EPCube BatteryPower] Solare: %.1f W | Backup: %.1f W | NonBackup: %.1f W | Grid: %.1f W → Batteria: %.3f kW",
-            produzione, consumo, non_backup, rete, value
+            float(produzione) * 10, float(consumo) * 10, float(non_backup) * 10, float(rete) * 10, value
         )
 
         return value
@@ -838,7 +839,7 @@ class EpCubeTotalLoadPowerSensor(CoordinatorEntity, SensorEntity):
         nonbackup = data.get("nonbackuppower")
         if backup is None and nonbackup is None:
             return None
-        return round(float(backup or 0) + float(nonbackup or 0), 1)
+        return round((float(backup or 0) + float(nonbackup or 0)) * 10, 1)
 
 
 class EpCubeTotalLoadEnergySensor(CoordinatorEntity, SensorEntity):
