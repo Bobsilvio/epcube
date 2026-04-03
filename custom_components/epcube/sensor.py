@@ -134,7 +134,7 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
             continue
 
         if base_key in config_sensors:
-            entity_category = EntityCategory.CONFIG
+            entity_category = EntityCategory.DIAGNOSTIC
         elif base_key in diagnostic_sensors:
             entity_category = EntityCategory.DIAGNOSTIC
 
@@ -940,7 +940,7 @@ class EpCubeTouScheduleSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = info["name"]
         self._attr_unique_id = info["unique_id"]
         self._attr_icon = info["icon"]
-        self._attr_entity_category = EntityCategory.CONFIG
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_device_class = None
         self._attr_device_info = {
             "identifiers": {("epcube", "epcube_device")},
@@ -986,7 +986,7 @@ class EpCubeTouActiveWeeksSensor(CoordinatorEntity, SensorEntity):
             self._attr_icon = "mdi:calendar-remove"
             self.key = "activeweeknonworkday"
         
-        self._attr_entity_category = EntityCategory.CONFIG
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_device_info = {
             "identifiers": {("epcube", "epcube_device")},
             "name": "EPCUBE",
