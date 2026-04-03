@@ -145,8 +145,13 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         if "electricity" in base_key:
             unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
             device_class = SensorDeviceClass.ENERGY
-            state_class = SensorStateClass.TOTAL_INCREASING
-            
+            # _annual/_monthly/_total si azzerano periodicamente o dopo reset HW:
+            # usare TOTAL (gestisce decrementi come reset) invece di TOTAL_INCREASING
+            if suffix_label in ("annual", "monthly", "total"):
+                state_class = SensorStateClass.TOTAL
+            else:
+                state_class = SensorStateClass.TOTAL_INCREASING
+
             if 'battery' in base_key:
                 device_class = None
                 state_class = SensorStateClass.MEASUREMENT
