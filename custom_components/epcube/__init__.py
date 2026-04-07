@@ -348,26 +348,43 @@ async def async_set_operating_mode(hass: HomeAssistant, call):
         _LOGGER.error("Device ID non trovato")
         return
 
-    # Costruisci il payload in base alla modalità
+    # Leggi i dati correnti per preservare le impostazioni TOU
+    current_data = coordinator.data.get("data", {})
+
+    # Payload base con tutti i campi TOU preservati
+    payload = {
+        "devId": dev_id,
+        "workStatus": mode,
+        "weatherWatch": "0",
+        "onlySave": "0",
+        # Preserve TOU settings regardless of target mode
+        "touType": current_data.get("toutype", 0),
+        "peakTimeList": current_data.get("peaktimelist", []),
+        "midPeakTimeList": current_data.get("midpeaktimelist", []),
+        "offPeakTimeList": current_data.get("offpeaktimelist", []),
+        "peakTimeListNonWorkDay": current_data.get("peaktimelistnonworkday", []),
+        "midPeakTimeListNonWorkDay": current_data.get("midpeaktimelistnonworkday", []),
+        "offPeakTimeListNonWorkDay": current_data.get("offpeaktimelistnonworkday", []),
+        "dayLightPeakTimeList": current_data.get("daylightpeaktimelist", []),
+        "dayLightMidPeakTimeList": current_data.get("daylightmidpeaktimelist", []),
+        "dayLightOffPeakTimeList": current_data.get("daylightoffpeaktimelist", []),
+        "activeWeek": current_data.get("activeweek", ["1", "2", "3", "4", "5"]),
+        "activeWeekNonWorkDay": current_data.get("activeweeknonworkday", ["6", "7"]),
+        "dayLightActiveWeek": current_data.get("daylightactiveweek", ["1", "2", "3", "4", "5"]),
+        "dayLightActiveWeekNonWorkDay": current_data.get("daylightactiveweeknonworkday", ["6", "7"]),
+        "dayLightSavingTime": current_data.get("daylightsavingtime", False),
+        "selfConsumptioinReserveSoc": str(current_data.get("selfconsumptioinreservesoc", 5)),
+        "allowChargingXiaGrid": str(current_data.get("allowchargingxiagrid", "1")),
+    }
+
+    # Aggiungi i parametri specifici per modalità
     if mode == "3":
-        soc_value = str(call.data.get("backup_power_reserve_soc", 50))
-        payload = {
-            "devId": dev_id,
-            "workStatus": "3",
-            "weatherWatch": "0",
-            "onlySave": "0",
-            "backupPowerReserveSoc": soc_value,
-        }
+        soc_value = str(call.data.get("backup_power_reserve_soc", current_data.get("backuppowerreservesoc", 50)))
+        payload["backupPowerReserveSoc"] = soc_value
         _LOGGER.info("Attivazione modalità Backup con SoC riserva %s%%", soc_value)
     else:  # mode == "1"
-        soc_value = str(call.data.get("self_consumption_reserve_soc", 5))
-        payload = {
-            "devId": dev_id,
-            "workStatus": "1",
-            "weatherWatch": "0",
-            "onlySave": "0",
-            "selfConsumptioinReserveSoc": soc_value,
-        }
+        soc_value = str(call.data.get("self_consumption_reserve_soc", current_data.get("selfconsumptioinreservesoc", 5)))
+        payload["selfConsumptioinReserveSoc"] = soc_value
         _LOGGER.info("Attivazione modalità Autoconsumo con SoC riserva %s%%", soc_value)
 
     base_url = get_base_url(region)

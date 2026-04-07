@@ -58,32 +58,39 @@ class EpCubeModeSelect(CoordinatorEntity, SelectEntity):
             _LOGGER.warning("Modalità non valida selezionata: %s", option)
             return
 
+        data = self.coordinator.data["data"]
         payload = {
-            "devId": self.coordinator.data["data"].get("devid"),
+            "devId": data.get("devid"),
             "workStatus": mode,
             "weatherWatch": "0",
             "onlySave": "0",
+            # Preserve TOU settings regardless of target mode
+            "touType": data.get("toutype", 0),
+            "peakTimeList": data.get("peaktimelist", []),
+            "midPeakTimeList": data.get("midpeaktimelist", []),
+            "offPeakTimeList": data.get("offpeaktimelist", []),
+            "peakTimeListNonWorkDay": data.get("peaktimelistnonworkday", []),
+            "midPeakTimeListNonWorkDay": data.get("midpeaktimelistnonworkday", []),
+            "offPeakTimeListNonWorkDay": data.get("offpeaktimelistnonworkday", []),
+            "dayLightPeakTimeList": data.get("daylightpeaktimelist", []),
+            "dayLightMidPeakTimeList": data.get("daylightmidpeaktimelist", []),
+            "dayLightOffPeakTimeList": data.get("daylightoffpeaktimelist", []),
+            "activeWeek": data.get("activeweek", ["1", "2", "3", "4", "5"]),
+            "activeWeekNonWorkDay": data.get("activeweeknonworkday", ["6", "7"]),
+            "dayLightActiveWeek": data.get("daylightactiveweek", ["1", "2", "3", "4", "5"]),
+            "dayLightActiveWeekNonWorkDay": data.get("daylightactiveweeknonworkday", ["6", "7"]),
+            "dayLightSavingTime": data.get("daylightsavingtime", False),
+            "selfConsumptioinReserveSoc": str(data.get("selfconsumptioinreservesoc", 5)),
+            "allowChargingXiaGrid": str(data.get("allowchargingxiagrid", "1")),
         }
 
-        # Aggiungi i parametri corretti in base alla modalità
+        # Aggiungi i parametri specifici per modalità
         if mode == "1":  # Autoconsumo
-            payload["selfConsumptioinReserveSoc"] = str(self.coordinator.data["data"].get("selfconsumptioinreservesoc", 15))
+            pass  # selfConsumptioinReserveSoc già incluso sopra
         elif mode == "2":  # Tariffazione
-            # Mantieni gli orari correnti se presenti, altrimenti usa valori di default
-            payload["offPeakTimeList"] = self.coordinator.data["data"].get("offpeaktimelist", [])
-            payload["peakTimeList"] = self.coordinator.data["data"].get("peaktimelist", [])
-            payload["midPeakTimeList"] = self.coordinator.data["data"].get("midpeaktimelist", [])
-            payload["activeWeek"] = self.coordinator.data["data"].get("activeweek", [1, 2, 3, 4, 5])
-            payload["activeWeekNonWorkDay"] = self.coordinator.data["data"].get("activeweeknonworkday", [6, 7])
-            payload["dayLightSavingTime"] = self.coordinator.data["data"].get("daylightsavingtime", False)
-            payload["dayLightOffPeakTimeList"] = self.coordinator.data["data"].get("daylightoffpeaktimelist", [])
-            payload["dayLightPeakTimeList"] = self.coordinator.data["data"].get("daylightpeaktimelist", [])
-            payload["dayLightMidPeakTimeList"] = self.coordinator.data["data"].get("daylightmidpeaktimelist", [])
-            payload["dayLightActiveWeek"] = self.coordinator.data["data"].get("daylightactiveweek", [1, 2, 3, 4, 5])
-            payload["dayLightActiveWeekNonWorkDay"] = self.coordinator.data["data"].get("daylightactiveweeknonworkday", [6, 7])
-            payload["evChargerReserveSoc"] = self.coordinator.data["data"].get("evchargerreservesoc", 50)
+            payload["evChargerReserveSoc"] = data.get("evchargerreservesoc", 50)
         elif mode == "3":  # Backup
-            payload["backupPowerReserveSoc"] = str(self.coordinator.data["data"].get("backuppowerreservesoc", 50))
+            payload["backupPowerReserveSoc"] = str(data.get("backuppowerreservesoc", 50))
 
         _LOGGER.debug("Invio payload switchMode (modalità %s): %s", option, payload)
         await self._post_switch_mode(payload)
