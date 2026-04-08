@@ -416,11 +416,13 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                 year_str = str(now.year)
                 month_str = now.strftime("%Y-%m")
                 today_str = now.strftime("%Y-%m-%d")
+                yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
                 live_data = {}
                 total_data = {}
                 annual_data = {}
                 monthly_data = {}
+                yesterday_data = {}
                 device_info = {}
                 device_list_info = {}
                 switch_mode_data = {}
@@ -430,6 +432,7 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                         total_data,
                         annual_data,
                         monthly_data,
+                        yesterday_data,
                         device_info,
                         device_list_info,
                         switch_mode_data,
@@ -438,6 +441,7 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                         fetch_epcube_stats(session, token, real_dev_id, year_str, 0, region),
                         fetch_epcube_stats(session, token, real_dev_id, year_str, 3, region),
                         fetch_epcube_stats(session, token, real_dev_id, month_str, 2, region),
+                        fetch_epcube_stats(session, token, real_dev_id, yesterday_str, 1, region),
                         fetch_device_info(session, token, real_dev_id, region),
                         fetch_device_list(session, token, real_dev_id, region),
                         fetch_switch_mode(session, token, real_dev_id, region),
@@ -499,6 +503,14 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                 for k, v in monthly_data.items():
                     full_data[f"{k}_monthly"] = v
 
+                INCLUDED_YESTERDAY_KEYS = {
+                    "gridelectricityfrom", "gridelectricityto",
+                    "solarelectricity", "backupelectricity", "nonbackupelectricity",
+                }
+                for k, v in yesterday_data.items():
+                    if k.lower() in INCLUDED_YESTERDAY_KEYS:
+                        full_data[f"{k.lower()}_yesterday"] = v
+
                 battery_now = full_data.get("batterycurrentelectricity")
                 if battery_now is not None:
                     try:
@@ -550,6 +562,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EpCubeBatteryPowerSensor(coordinator),
         EpCubeTotalLoadPowerSensor(coordinator),
         EpCubeTotalLoadEnergySensor(coordinator),
+        # Sensori giorno precedente
+        EpCubeYesterdayGridFromSensor(coordinator),
+        EpCubeYesterdayGridToSensor(coordinator),
+        EpCubeYesterdaySolarSensor(coordinator),
+        EpCubeYesterdayLoadSensor(coordinator),
         # Sensori TOU (Tariffazione)
         EpCubeTouScheduleSensor(coordinator, "peak"),
         EpCubeTouScheduleSensor(coordinator, "midpeak"),
@@ -870,6 +887,113 @@ class EpCubeTotalLoadEnergySensor(CoordinatorEntity, SensorEntity):
         data = self.coordinator.data.get("data", {})
         backup = data.get("backupelectricity")
         nonbackup = data.get("nonbackupelectricity")
+        if backup is None and nonbackup is None:
+            return None
+        return round(float(backup or 0) + float(nonbackup or 0), 3)
+
+
+class EpCubeYesterdayGridFromSensor(CoordinatorEntity, SensorEntity):
+    """Energia prelevata dalla rete ieri."""
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = "epcube_yesterday_grid_from"
+        self._attr_translation_key = "yesterday_grid_from"
+        self._attr_has_entity_name = True
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_icon = "mdi:transmission-tower-import"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data.get("data", {})
+        v = data.get("gridelectricityfrom_yesterday")
+        return round(float(v), 3) if v is not None else None
+
+
+class EpCubeYesterdayGridToSensor(CoordinatorEntity, SensorEntity):
+    """Energia immessa in rete ieri."""
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = "epcube_yesterday_grid_to"
+        self._attr_translation_key = "yesterday_grid_to"
+        self._attr_has_entity_name = True
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_icon = "mdi:transmission-tower-export"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data.get("data", {})
+        v = data.get("gridelectricityto_yesterday")
+        return round(float(v), 3) if v is not None else None
+
+
+class EpCubeYesterdaySolarSensor(CoordinatorEntity, SensorEntity):
+    """Energia prodotta dal fotovoltaico ieri."""
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = "epcube_yesterday_solar"
+        self._attr_translation_key = "yesterday_solar"
+        self._attr_has_entity_name = True
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_icon = "mdi:solar-power-variant"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data.get("data", {})
+        v = data.get("solarelectricity_yesterday")
+        return round(float(v), 3) if v is not None else None
+
+
+class EpCubeYesterdayLoadSensor(CoordinatorEntity, SensorEntity):
+    """Energia totale consumata ieri (backup + non-backup)."""
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = "epcube_yesterday_load"
+        self._attr_translation_key = "yesterday_load"
+        self._attr_has_entity_name = True
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_icon = "mdi:home-lightning-bolt-outline"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data.get("data", {})
+        backup = data.get("backupelectricity_yesterday")
+        nonbackup = data.get("nonbackupelectricity_yesterday")
         if backup is None and nonbackup is None:
             return None
         return round(float(backup or 0) + float(nonbackup or 0), 3)

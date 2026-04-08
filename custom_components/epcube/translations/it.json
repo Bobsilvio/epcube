@@ -23,6 +23,18 @@
   },
   "entity": {
     "sensor": {
+      "yesterday_grid_from": {
+        "name": "Energia Prelevata Ieri"
+      },
+      "yesterday_grid_to": {
+        "name": "Energia Immessa Ieri"
+      },
+      "yesterday_solar": {
+        "name": "Energia Prodotta Ieri"
+      },
+      "yesterday_load": {
+        "name": "Energia Consumata Ieri"
+      },
       "battery_daily_charge": {
         "name": "Carica Batteria Oggi"
       },
