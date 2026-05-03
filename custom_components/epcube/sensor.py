@@ -122,6 +122,11 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         key_lower = key.lower()
         entity_category = None
 
+        # I campi *_yesterday alimentano i sensori dedicati EpCubeYesterday*Sensor:
+        # non generare duplicati auto-nominati male
+        if key_lower.endswith("_yesterday"):
+            continue
+
         suffix_label = ""
         base_key = key_lower
         for suffix, label in suffix_map.items():
