@@ -13,7 +13,7 @@ FIELD_TRANSLATIONS = {
     
     # === Modalità e Impostazioni ===
     "workstatus": "Modalità Operativa",
-    "systemstatus": "Stato Sistema",
+    "systemstatus": "Stato Gateway",
     "backuploadsmode": "Modalità Carico Backup",
     "backuptype": "Tipo Backup",
     "toutype": "Tipo Tariffazione",
@@ -165,14 +165,30 @@ OPERATION_MODES = {
     "3": "Backup",
 }
 
-# Stato sistema
+# Stato gateway (campo API systemStatus)
+# Valori confermati dal supporto EP Cube e dalla console installatori
+# (deviceDetail: 1 -> fault, 5 -> notTurnedOn)
 SYSTEM_STATUS = {
-    "0": "Offline",
-    "1": "Online",
-    "2": "Durante attivazione",
-    "3": "Guasto",
-    "4": "Normale",
-    "5": "Timeout",
+    "0": "Autotest",
+    "1": "Guasto",
+    "2": "Inattivo",
+    "3": "Standby",
+    "4": "In funzione",
+    "5": "Non alimentato",
+    "6": "Bassa potenza",
+    "7": "In protezione",
+}
+
+# Mappa numero -> chiave di traduzione HA per il sensore enum
+SYSTEM_STATUS_OPTIONS = {
+    "0": "self_test",
+    "1": "fault",
+    "2": "idle",
+    "3": "standby",
+    "4": "running",
+    "5": "not_powered",
+    "6": "low_power",
+    "7": "under_protection",
 }
 
 # Tipo backup

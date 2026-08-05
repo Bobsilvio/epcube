@@ -181,7 +181,17 @@
         "name": "Source Type"
       },
       "systemstatus": {
-        "name": "System Status"
+        "name": "Gateway Status",
+        "state": {
+          "self_test": "Self-test",
+          "fault": "Fault",
+          "idle": "Idle",
+          "standby": "Standby",
+          "running": "Running",
+          "not_powered": "Not Powered",
+          "low_power": "Low Power",
+          "under_protection": "Under Protection"
+        }
       },
       "backuptype": {
         "name": "Home Backup Type"

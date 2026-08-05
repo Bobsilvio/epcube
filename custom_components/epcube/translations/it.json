@@ -297,7 +297,17 @@
         "name": "Guasto Presente"
       },
       "systemstatus": {
-        "name": "Stato Sistema"
+        "name": "Stato Gateway",
+        "state": {
+          "self_test": "Autotest",
+          "fault": "Guasto",
+          "idle": "Inattivo",
+          "standby": "Standby",
+          "running": "In funzione",
+          "not_powered": "Non alimentato",
+          "low_power": "Bassa potenza",
+          "under_protection": "In protezione"
+        }
       },
       "defcreatetime": {
         "name": "Data Registrazione Dispositivo"

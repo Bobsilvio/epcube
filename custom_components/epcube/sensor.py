@@ -13,7 +13,7 @@ from .const import (
     CONF_ENABLE_MONTHLY, get_base_url, USER_AGENT, HTTP_TIMEOUT, 
     HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY
 )
-from .translations import translate_field_name, translate_status_value
+from .translations import translate_field_name, translate_status_value, SYSTEM_STATUS_OPTIONS
 import aiohttp
 import async_timeout
 import asyncio
@@ -121,6 +121,7 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
     for key, value in data.items():
         key_lower = key.lower()
         entity_category = None
+        options = None
 
         # I campi *_yesterday alimentano i sensori dedicati EpCubeYesterday*Sensor:
         # non generare duplicati auto-nominati male
@@ -169,6 +170,13 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
             device_class = SensorDeviceClass.POWER
             unit_of_measurement = UnitOfPower.WATT
             state_class = SensorStateClass.MEASUREMENT
+
+        # systemStatus = stato del gateway (0-7), esposto come enum tradotto
+        elif base_key == "systemstatus" and not suffix_label:
+            device_class = SensorDeviceClass.ENUM
+            unit_of_measurement = None
+            state_class = None
+            options = list(SYSTEM_STATUS_OPTIONS.values())
 
         elif "soc" in base_key:
             unit_of_measurement = PERCENTAGE
@@ -222,6 +230,7 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
             device_class=device_class,
             entity_category=entity_category,
             state_class=state_class,
+            options=options,
             entity_registry_enabled_default=entity_registry_enabled_default
         )
 
@@ -620,6 +629,7 @@ class EpCubeSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = description.device_class
         self._attr_state_class = description.state_class
         self._attr_entity_category = description.entity_category
+        self._attr_options = description.options
         self._attr_device_info = {
             "identifiers": {("epcube", "epcube_device")},
             "name": "EPCUBE",
@@ -634,6 +644,10 @@ class EpCubeSensor(CoordinatorEntity, SensorEntity):
         value = self.coordinator.data["data"].get(self.entity_description.key)
 
         if value is not None:
+            if self.entity_description.device_class == SensorDeviceClass.ENUM:
+                # Valore fuori mappa: None invece di uno stato non dichiarato in options
+                return SYSTEM_STATUS_OPTIONS.get(str(value))
+
             if self.entity_description.device_class == SensorDeviceClass.POWER:
                 try:
                     return round(float(value) * 10, 1)
