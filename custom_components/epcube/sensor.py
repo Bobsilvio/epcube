@@ -23,6 +23,15 @@ from datetime import timedelta, datetime, date
 import logging
 _LOGGER = logging.getLogger(__name__)
 
+def _is_numeric(value):
+    """True se il valore è convertibile in float (anche se arriva come stringa)."""
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def generate_sensors(data, enable_total=False, enable_annual=False, enable_monthly=False):
     """Genera i sensori per i dati ricevuti."""
     sensors = []
@@ -148,7 +157,19 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         #power = kW (none)
         #power (i numeri arrivano in watt) = W
         
-        if "electricity" in base_key:
+        # Valori testuali (orari TOU tipo "23:00_07:00_", hint, liste): mai
+        # device_class/state_class numerici. Il nome di alcuni di questi campi
+        # contiene "electricity" (lowElectricityPriceTime) e finirebbe fra i
+        # sensori di energia: HA solleva ValueError nel push agli entity e
+        # l'eccezione blocca l'aggiornamento di TUTTI i sensori (issue #26)
+        if isinstance(value, str) and not _is_numeric(value):
+            device_class = None
+            unit_of_measurement = None
+            state_class = None
+            if entity_category is None:
+                entity_category = EntityCategory.DIAGNOSTIC
+
+        elif "electricity" in base_key:
             unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
             device_class = SensorDeviceClass.ENERGY
             # _annual/_monthly/_total si azzerano periodicamente o dopo reset HW:
@@ -679,6 +700,19 @@ class EpCubeSensor(CoordinatorEntity, SensorEntity):
                     return round(float(value) * 10, 1)
                 except (ValueError, TypeError):
                     return None
+
+            # Rete di sicurezza: un sensore numerico che riceve testo farebbe
+            # sollevare ValueError a HA, uccidendo l'update di tutti gli altri
+            if (
+                self.entity_description.state_class is not None
+                or self.entity_description.device_class is not None
+            ) and not _is_numeric(value):
+                _LOGGER.warning(
+                    "Valore non numerico %r per il sensore %s (%s): ignorato",
+                    value, self.entity_description.key,
+                    self.entity_description.device_class,
+                )
+                return None
         return value
 
 class EpCubeLastUpdateSensor(CoordinatorEntity, SensorEntity):
