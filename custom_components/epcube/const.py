@@ -12,6 +12,10 @@ CONF_ENABLE_MONTHLY = "enable_monthly"
 USER_AGENT = "ReservoirMonitoring/2.1.0 (iPhone; iOS 18.3.2; Scale/3.00)"
 HTTP_TIMEOUT = 30  # seconds
 HTTP_CONNECT_TIMEOUT = 10  # seconds
+# Budget più stretto per gli endpoint supplementari (statistiche, info device):
+# deve restare sotto HTTP_TIMEOUT, altrimenti un endpoint lento fa scadere il
+# timeout master e butta via anche i dati live già letti (server JP, issue #27)
+STATS_TIMEOUT = 12  # seconds
 
 # Retry Configuration
 MAX_RETRIES = 3

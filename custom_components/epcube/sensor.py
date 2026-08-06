@@ -11,7 +11,7 @@ from .state import EpCubeDataState
 from .const import (
     DOMAIN, DEFAULT_SCAN_INTERVAL, CONF_ENABLE_TOTAL, CONF_ENABLE_ANNUAL, 
     CONF_ENABLE_MONTHLY, get_base_url, USER_AGENT, HTTP_TIMEOUT, 
-    HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY
+    HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY, STATS_TIMEOUT
 )
 from .translations import translate_field_name, translate_status_value, SYSTEM_STATUS_OPTIONS
 import aiohttp
@@ -238,7 +238,7 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
 
     return sensors
 
-async def fetch_device_info(session, token, dev_id, region):
+async def fetch_device_info(session, token, dev_id, region, timeout=STATS_TIMEOUT):
     base_url = get_base_url(region)
     url = f"{base_url}/device/userDeviceInfo?devId={dev_id}"
     headers = {
@@ -250,7 +250,7 @@ async def fetch_device_info(session, token, dev_id, region):
     }
 
     try:
-        with async_timeout.timeout(HTTP_TIMEOUT):
+        with async_timeout.timeout(timeout):
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     json_data = await resp.json()
@@ -276,7 +276,7 @@ async def fetch_device_info(session, token, dev_id, region):
         _LOGGER.exception("Errore inaspettato nel fetch device info: %s", e)
         return {}
 
-async def fetch_device_list(session, token, dev_id, region):
+async def fetch_device_list(session, token, dev_id, region, timeout=STATS_TIMEOUT):
     """Fetch deviceList e ritorna l'entry corrispondente a dev_id."""
     base_url = get_base_url(region)
     url = f"{base_url}/device/deviceList"
@@ -289,7 +289,7 @@ async def fetch_device_list(session, token, dev_id, region):
     }
 
     try:
-        with async_timeout.timeout(HTTP_TIMEOUT):
+        with async_timeout.timeout(timeout):
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     json_data = await resp.json()
@@ -319,7 +319,7 @@ async def fetch_device_list(session, token, dev_id, region):
         return {}
 
 
-async def fetch_switch_mode(session, token, dev_id, region):
+async def fetch_switch_mode(session, token, dev_id, region, timeout=STATS_TIMEOUT):
     """Fetch getSwitchMode e ritorna i dati normalizzati in lowercase."""
     base_url = get_base_url(region)
     url = f"{base_url}/device/getSwitchMode?devId={dev_id}"
@@ -332,7 +332,7 @@ async def fetch_switch_mode(session, token, dev_id, region):
     }
 
     try:
-        with async_timeout.timeout(HTTP_TIMEOUT):
+        with async_timeout.timeout(timeout):
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     json_data = await resp.json()
@@ -358,7 +358,7 @@ async def fetch_switch_mode(session, token, dev_id, region):
         return {}
 
 
-async def fetch_epcube_stats(session, token, dev_id, date_str, scope_type, region):
+async def fetch_epcube_stats(session, token, dev_id, date_str, scope_type, region, timeout=STATS_TIMEOUT):
     base_url = get_base_url(region)
     url = f"{base_url}/device/queryDataElectricityV2?devId={dev_id}&queryDateStr={date_str}&scopeType={scope_type}"
     headers = {
@@ -370,7 +370,7 @@ async def fetch_epcube_stats(session, token, dev_id, date_str, scope_type, regio
     }
 
     try:
-        with async_timeout.timeout(HTTP_TIMEOUT):
+        with async_timeout.timeout(timeout):
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     json_data = await resp.json()
@@ -419,7 +419,16 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                     raise UpdateFailed(f"Tipo MIME non gestito: {resp.content_type}")
 
                 live_data = await resp.json()
-                full_data_raw = live_data.get("data", {})
+
+                # I server US/JP restituiscono HTTP 200 con l'errore reale nel corpo
+                api_status = live_data.get("status")
+                if api_status is not None and int(api_status) != 200:
+                    api_message = live_data.get("message", "")
+                    if int(api_status) in (401, 403):
+                        raise UpdateFailed(f"Token non valido o scaduto: {api_message}")
+                    raise UpdateFailed(f"Errore API {api_status}: {api_message}")
+
+                full_data_raw = live_data.get("data") or {}
                 full_data = {k.lower(): v for k, v in full_data_raw.items()}
                 real_dev_id = full_data.get("devid")
 
@@ -440,7 +449,34 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                 device_info = {}
                 device_list_info = {}
                 switch_mode_data = {}
+                # Gli endpoint supplementari sono opzionali: se uno è lento o rotto
+                # (es. queryDataElectricityV2 sul cluster JP, issue #27) i dati live
+                # di homeDeviceInfo devono comunque arrivare in Home Assistant.
+                # Ogni fetch ha il proprio budget STATS_TIMEOUT < HTTP_TIMEOUT.
                 try:
+                    results = await asyncio.gather(
+                        fetch_epcube_stats(session, token, real_dev_id, today_str, 1, region),
+                        fetch_epcube_stats(session, token, real_dev_id, year_str, 0, region),
+                        fetch_epcube_stats(session, token, real_dev_id, year_str, 3, region),
+                        fetch_epcube_stats(session, token, real_dev_id, month_str, 2, region),
+                        fetch_epcube_stats(session, token, real_dev_id, yesterday_str, 1, region),
+                        fetch_device_info(session, token, real_dev_id, region),
+                        fetch_device_list(session, token, real_dev_id, region),
+                        fetch_switch_mode(session, token, real_dev_id, region),
+                        return_exceptions=True,
+                    )
+                    labels = (
+                        "stats giornaliere", "stats totali", "stats annuali",
+                        "stats mensili", "stats ieri", "device info",
+                        "deviceList", "switch mode",
+                    )
+                    clean = []
+                    for label, result in zip(labels, results):
+                        if isinstance(result, BaseException):
+                            _LOGGER.warning("Fetch %s fallito: %s", label, result)
+                            clean.append({})
+                        else:
+                            clean.append(result or {})
                     (
                         live_data,
                         total_data,
@@ -450,17 +486,7 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                         device_info,
                         device_list_info,
                         switch_mode_data,
-                    ) = await asyncio.gather(
-                        fetch_epcube_stats(session, token, real_dev_id, today_str, 1, region),
-                        fetch_epcube_stats(session, token, real_dev_id, year_str, 0, region),
-                        fetch_epcube_stats(session, token, real_dev_id, year_str, 3, region),
-                        fetch_epcube_stats(session, token, real_dev_id, month_str, 2, region),
-                        fetch_epcube_stats(session, token, real_dev_id, yesterday_str, 1, region),
-                        fetch_device_info(session, token, real_dev_id, region),
-                        fetch_device_list(session, token, real_dev_id, region),
-                        fetch_switch_mode(session, token, real_dev_id, region),
-                        return_exceptions=False,
-                    )
+                    ) = clean
                 except Exception as e:
                     _LOGGER.warning("Errore nel fetch dati supplementari: %s", e)
 
