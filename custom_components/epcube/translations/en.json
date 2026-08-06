@@ -3,9 +3,24 @@
     "step": {
       "user": {
         "data": {
-          "token": "Token EPCUBE"
-        }
+          "token": "Token EPCUBE",
+          "region": "Region (must match the one used to generate the token)"
+        },
+        "description": "Paste the token generated for the SAME region you select here. A token created for another region is rejected by the server."
       }
+    },
+    "error": {
+      "invalid_token": "Token rejected by the server. It is expired, or it was generated for a different region — regenerate it choosing the same region you select here (US covers North America, including Canada).",
+      "sn_not_found": "No device found for this account.",
+      "forbidden": "Access denied by the server.",
+      "server_error": "EP Cube server error. Try again later.",
+      "http_error": "Unexpected response from the EP Cube server.",
+      "timeout": "Timeout contacting the EP Cube server.",
+      "connection_error": "Cannot reach the EP Cube server. Check Home Assistant's internet access.",
+      "unknown_error": "Unknown error. Check the Home Assistant logs for details."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
     }
   },
   "options": {

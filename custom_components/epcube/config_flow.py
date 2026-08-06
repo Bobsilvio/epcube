@@ -30,7 +30,8 @@ class EpCubeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             sn = await self._get_sn_from_token(token, region)
 
             if not sn:
-                self._errors["base"] = "sn_not_found"
+                # _get_sn_from_token ha già impostato l'errore specifico
+                self._errors.setdefault("base", "sn_not_found")
             else:
                 for entry in self._async_current_entries():
                     if entry.data.get("sn") == sn:
@@ -76,9 +77,27 @@ class EpCubeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(url, headers=headers) as response:
                         if response.status == 200:
-                            data = await response.json()
+                            data = await response.json(content_type=None)
                             _LOGGER.debug("Risposta user/base: %s", data)
-                            sn = data.get("data", {}).get("defDevSgSn")
+
+                            # I server US/JP incapsulano gli errori in una risposta
+                            # HTTP 200 con lo stato reale nel corpo (es. token di
+                            # un'altra regione -> status 403 "User token expired")
+                            api_status = data.get("status")
+                            if api_status is not None and int(api_status) != 200:
+                                api_message = data.get("message", "")
+                                _LOGGER.error(
+                                    "Errore API %s su %s: %s", api_status, base_url, api_message
+                                )
+                                if int(api_status) in (401, 403):
+                                    self._errors["base"] = "invalid_token"
+                                elif int(api_status) >= 500:
+                                    self._errors["base"] = "server_error"
+                                else:
+                                    self._errors["base"] = "http_error"
+                                return None
+
+                            sn = (data.get("data") or {}).get("defDevSgSn")
                             if sn:
                                 return sn
                             else:
