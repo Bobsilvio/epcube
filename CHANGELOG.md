@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.6.1
+
+### Fixed
+- **`sensor.epcube_battery_power` never settling at zero**
+  ([#20](https://github.com/Bobsilvio/epcube/issues/20)): the value is estimated
+  from solar, grid and load, and those are not sampled at the same instant, so
+  an idle battery still showed a few tens of watts. Values below 100 W are now
+  reported as 0.
+
 ## v1.6.0
 
 > ## ⚠️ READ THIS BEFORE UPDATING — ENTITY IDENTIFIERS CHANGE

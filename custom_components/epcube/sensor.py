@@ -12,7 +12,8 @@ from .entity import bind_entities_to_entry, legacy_unique_id
 from .const import (
     DOMAIN, DEFAULT_SCAN_INTERVAL, CONF_ENABLE_TOTAL, CONF_ENABLE_ANNUAL, 
     CONF_ENABLE_MONTHLY, get_base_url, USER_AGENT, HTTP_TIMEOUT, 
-    HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY, STATS_TIMEOUT
+    HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY, STATS_TIMEOUT,
+    BATTERY_POWER_DEADBAND_KW
 )
 from .translations import translate_field_name, translate_status_value, SYSTEM_STATUS_OPTIONS
 import aiohttp
@@ -910,6 +911,13 @@ class EpCubeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         # Bilancio: batteria = solare + rete - carichi
         non_backup = data.get("nonbackuppower") or 0
         power_kw = 10 * (float(produzione) + float(rete) - float(consumo) - float(non_backup)) / 1000
+
+        # I termini della stima non sono campionati nello stesso istante: a
+        # batteria ferma resta un residuo di qualche decina di watt, sotto la
+        # risoluzione della misura. Meglio dichiarare 0 che inventare un flusso
+        if abs(power_kw) < BATTERY_POWER_DEADBAND_KW:
+            power_kw = 0.0
+
         value = round(power_kw, 3)
 
         _LOGGER.debug(

@@ -17,6 +17,11 @@ HTTP_CONNECT_TIMEOUT = 10  # seconds
 # timeout master e butta via anche i dati live già letti (server JP, issue #27)
 STATS_TIMEOUT = 12  # seconds
 
+# La potenza batteria è stimata da solare/rete/carichi, campionati dall'API in
+# istanti leggermente diversi: a batteria ferma resta un residuo di qualche
+# decina di watt. Sotto questa soglia il valore viene riportato a 0 (issue #20)
+BATTERY_POWER_DEADBAND_KW = 0.1
+
 # Retry Configuration
 MAX_RETRIES = 3
 RETRY_DELAY = 1  # seconds
