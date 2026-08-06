@@ -2,6 +2,7 @@ from homeassistant.components.number import NumberEntity, NumberEntityDescriptio
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.const import EntityCategory
+from .entity import bind_entities_to_entry
 from .const import DOMAIN, get_base_url, USER_AGENT, HTTP_TIMEOUT, HTTP_CONNECT_TIMEOUT
 
 import aiohttp
@@ -17,7 +18,7 @@ SOC_KEYS = {
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    async_add_entities([
+    entities = [
         EpCubeDynamicSocNumber(coordinator, entry),
         EpCubeStaticSocNumber(coordinator, entry, "selfconsumptioinreservesoc", "SOC Autoconsumo", 0, 100),
         EpCubeStaticSocNumber(coordinator, entry, "backuppowerreservesoc", "SOC Backup", 50, 100),
@@ -28,7 +29,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EpCubeTouHourNumber(coordinator, entry, "midpeak_end", "TOU Semi-Picco Fine", 0),
         EpCubeTouHourNumber(coordinator, entry, "offpeak_start", "TOU Fuori Picco Inizio", 0),
         EpCubeTouHourNumber(coordinator, entry, "offpeak_end", "TOU Fuori Picco Fine", 0),
-    ], True)
+    ]
+    bind_entities_to_entry(entities, entry)
+    async_add_entities(entities, True)
 
 
 class EpCubeDynamicSocNumber(CoordinatorEntity, NumberEntity):

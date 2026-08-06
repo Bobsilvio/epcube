@@ -6,6 +6,7 @@ from .const import (
 )
 from .sensor import async_update_data_with_stats
 from .state import EpCubeDataState
+from .entity import async_migrate_entry_identifiers
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from datetime import timedelta, datetime
@@ -59,7 +60,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
     
     await coordinator.async_refresh()
-    
+
+    # unique_id e device per-impianto: migra le installazioni pre-1.6.0 prima
+    # di creare le entità, così entity_id e storico restano invariati (#25)
+    async_migrate_entry_identifiers(hass, entry)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
     # Registra il service per TOU

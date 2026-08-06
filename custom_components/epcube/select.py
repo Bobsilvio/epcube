@@ -1,6 +1,7 @@
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import EntityCategory
+from .entity import bind_entities_to_entry
 from .const import (
     DOMAIN, get_base_url, USER_AGENT, HTTP_TIMEOUT, 
     HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY
@@ -24,7 +25,9 @@ REVERSE_MODE_MAP = {v: k for k, v in MODE_MAP.items()}
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    async_add_entities([EpCubeModeSelect(coordinator, entry)], True)
+    entities = [EpCubeModeSelect(coordinator, entry)]
+    bind_entities_to_entry(entities, entry)
+    async_add_entities(entities, True)
 
 
 class EpCubeModeSelect(CoordinatorEntity, SelectEntity):

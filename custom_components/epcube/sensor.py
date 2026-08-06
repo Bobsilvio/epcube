@@ -8,6 +8,7 @@ from homeassistant.helpers.entity_registry import async_get, RegistryEntryDisabl
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .state import EpCubeDataState
+from .entity import bind_entities_to_entry, legacy_unique_id
 from .const import (
     DOMAIN, DEFAULT_SCAN_INTERVAL, CONF_ENABLE_TOTAL, CONF_ENABLE_ANNUAL, 
     CONF_ENABLE_MONTHLY, get_base_url, USER_AGENT, HTTP_TIMEOUT, 
@@ -640,6 +641,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ]
     
 
+    bind_entities_to_entry(entities, entry)
+
     registry = async_get(hass)
 
     for entity in entities:
@@ -656,7 +659,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 domain="sensor",
                 platform=DOMAIN,
                 unique_id=entity.unique_id,
-                suggested_object_id=entity.unique_id,
+                # entity_id senza il serial number: con più impianti è Home
+                # Assistant ad aggiungere il suffisso _2 al secondo
+                suggested_object_id=legacy_unique_id(entity.unique_id, entry),
                 disabled_by=disabled_by
             )
 

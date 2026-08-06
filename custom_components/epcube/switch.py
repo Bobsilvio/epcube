@@ -1,6 +1,7 @@
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import EntityCategory
+from .entity import bind_entities_to_entry
 from .const import (
     DOMAIN, get_base_url, USER_AGENT, HTTP_TIMEOUT,
     HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY
@@ -15,7 +16,9 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    async_add_entities([EpCubeAllowChargingFromGridSwitch(coordinator, entry)], True)
+    entities = [EpCubeAllowChargingFromGridSwitch(coordinator, entry)]
+    bind_entities_to_entry(entities, entry)
+    async_add_entities(entities, True)
 
 
 class EpCubeAllowChargingFromGridSwitch(CoordinatorEntity, SwitchEntity):
