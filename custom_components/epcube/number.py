@@ -2,11 +2,12 @@ from homeassistant.components.number import NumberEntity, NumberEntityDescriptio
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.const import EntityCategory
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .entity import bind_entities_to_entry
-from .const import DOMAIN, get_base_url, USER_AGENT, HTTP_TIMEOUT, HTTP_CONNECT_TIMEOUT
+from .payload import build_switch_mode_payload
+from .api import async_post_switch_mode
+from .const import DOMAIN, get_base_url
 
-import aiohttp
-import asyncio
 import logging
 
 _LOGGER = logging.getLogger(__name__)
@@ -94,39 +95,26 @@ class EpCubeDynamicSocNumber(CoordinatorEntity, NumberEntity):
     
 
     async def async_set_native_value(self, value: float):
-        dev_id = self.coordinator.data.get("data", {}).get("devid")
-        work_status = self._mode
+        soc_key = self._soc_key
+        if soc_key is None:
+            _LOGGER.warning(
+                "Modalità %s senza SoC di riserva associato: valore ignorato", self._mode
+            )
+            return
 
-        key_original = self._soc_key
-        payload = {
-            "devId": dev_id,
-            "workStatus": str(work_status),
-            "weatherWatch": "0",
-            "onlySave": "0",
-            key_original: str(int(value)),
-        }
+        data = self.coordinator.data.get("data", {})
 
-        _LOGGER.debug("Invio payload switchMode (SOC dinamico): %s", payload)
-        await self._post_switch_mode(payload)
+        # Payload completo: i campi omessi vengono riportati al default dal
+        # server, azzerando fasce TOU e l'altro SoC di riserva (issue #31)
+        payload = build_switch_mode_payload(
+            data,
+            work_status=self._mode,
+            **{soc_key: str(int(value))},
+        )
 
-    async def _post_switch_mode(self, payload):
-        url = f"{self.base_url}/device/switchMode"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": self.entry.data.get("token"),
-            "User-Agent": "ReservoirMonitoring/2.1.0 (iPhone; iOS 18.3.2; Scale/3.00)",
-            "Accept": "*/*",
-            "Accept-Language": "it-IT",
-            "Accept-Encoding": "gzip, deflate, br"
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    _LOGGER.error("Errore nell'invio SoC EP Cube dinamico: %s", text)
-                else:
-                    _LOGGER.info("SOC dinamico aggiornato correttamente. Risposta: %s", text)
-                    await self.coordinator.async_request_refresh()
+        session = async_get_clientsession(self.hass)
+        if await async_post_switch_mode(session, self.entry, payload, "SOC dinamico"):
+            await self.coordinator.async_request_refresh()
 
 
 class EpCubeStaticSocNumber(CoordinatorEntity, NumberEntity):
@@ -166,39 +154,17 @@ class EpCubeStaticSocNumber(CoordinatorEntity, NumberEntity):
     
 
     async def async_set_native_value(self, value: float):
-        dev_id = self.coordinator.data.get("data", {}).get("devid")
-        work_status = self.coordinator.data.get("data", {}).get("workstatus")
-        
+        data = self.coordinator.data.get("data", {})
 
-        payload = {
-            "devId": dev_id,
-            "workStatus": str(work_status),
-            "weatherWatch": "0",
-            "onlySave": "0",
-            self.original_key: str(int(value)),
-        }
+        # Payload completo, vedi EpCubeDynamicSocNumber (issue #31)
+        payload = build_switch_mode_payload(
+            data,
+            **{self.original_key: str(int(value))},
+        )
 
-        _LOGGER.debug("Invio payload switchMode (SOC statico): %s", payload)
-        await self._post_switch_mode(payload)
-
-    async def _post_switch_mode(self, payload):
-        url = f"{self.base_url}/device/switchMode"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": self.entry.data.get("token"),
-            "User-Agent": "ReservoirMonitoring/2.1.0 (iPhone; iOS 18.3.2; Scale/3.00)",
-            "Accept": "*/*",
-            "Accept-Language": "it-IT",
-            "Accept-Encoding": "gzip, deflate, br"
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    _LOGGER.error("Errore nell'invio SoC EP Cube statico: %s", text)
-                else:
-                    _LOGGER.info("SOC statico aggiornato correttamente. Risposta: %s", text)
-                    await self.coordinator.async_request_refresh()
+        session = async_get_clientsession(self.hass)
+        if await async_post_switch_mode(session, self.entry, payload, "SOC statico"):
+            await self.coordinator.async_request_refresh()
 
 class EpCubeTouHourNumber(CoordinatorEntity, RestoreEntity, NumberEntity):
     """Number entity per configurare gli orari TOU (Time of Use)."""

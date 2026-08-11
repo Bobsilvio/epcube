@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.6.2
+
+### Fixed
+- **SOC reserve sliders silently resetting the rest of the configuration**
+  ([#31](https://github.com/Bobsilvio/epcube/issues/31)): the two SOC reserve
+  `number` entities sent a partial `switchMode` payload, and the vendor API
+  treats any missing field as "reset to default" — the same failure mode as
+  [#18](https://github.com/Bobsilvio/epcube/issues/18). Changing one slider
+  could wipe the TOU schedule and the other reserve. All write paths now build
+  the full payload from a single shared definition.
+
+### Changed
+- The `switchMode` POST is now implemented once instead of three times: the
+  SOC entities inherit the timeout and retry handling they never had, and every
+  write path uses Home Assistant's shared HTTP session and honours a token
+  updated through the options flow.
+
 ## v1.6.1
 
 ### Fixed
