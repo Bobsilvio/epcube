@@ -10,26 +10,41 @@ number la riusano passando solo i campi da cambiare. Non importa nulla di Home
 Assistant di proposito, così resta verificabile in isolamento.
 """
 
+# Campi di getSwitchMode che sono solo informativi: non si rispediscono
+READ_ONLY_FIELDS = {
+    "devId", "dynamicPriceTips", "hasEvse", "evseOnline", "isDayLightSaving", "dayType",
+}
+
 # Giorni di default se il coordinator non ha ancora la configurazione
 DEFAULT_ACTIVE_WEEK = ["1", "2", "3", "4", "5"]
 DEFAULT_ACTIVE_WEEK_NON_WORKDAY = ["6", "7"]
 
 
-def build_switch_mode_payload(data, work_status=None, only_save="0", **overrides):
+def build_switch_mode_payload(data, work_status=None, only_save="0", current=None, **overrides):
     """Payload switchMode completo a partire dai dati del coordinator.
 
     data: dizionario del coordinator (chiavi minuscole)
     work_status: modalità da impostare; se None resta quella corrente
     only_save: "1" salva senza cambiare modalità, "0" applica la modalità
+    current: risposta di getSwitchMode con le chiavi originali. Come fa l'app,
+        che rimanda l'intera configurazione letta, ogni campo viene rispedito
+        col suo valore: anche quelli che questo modulo non conosce (riserva EV,
+        winter mode, limite di carica sul backend EU) restano invariati
     overrides: campi da sostituire, con i nomi camelCase attesi dall'API
     """
     if work_status is None:
         work_status = data.get("workstatus", "1")
 
     payload = {
+        key: value
+        for key, value in (current or {}).items()
+        if key not in READ_ONLY_FIELDS and value is not None
+    }
+
+    payload |= {
         "devId": data.get("devid"),
         "workStatus": str(work_status),
-        "weatherWatch": "0",
+        "weatherWatch": str(data.get("weatherwatch", "0")),
         "onlySave": str(only_save),
         # Fasce TOU: vanno rispedite sempre, anche cambiando modalità
         "touType": data.get("toutype", 0),

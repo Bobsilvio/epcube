@@ -1,12 +1,13 @@
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import EntityCategory
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .entity import bind_entities_to_entry
 from .payload import build_switch_mode_payload
 from .api import async_post_switch_mode
 from .const import DOMAIN
 from .translations import OPERATION_MODES
+
+from homeassistant.exceptions import HomeAssistantError
 
 import logging
 import json
@@ -19,6 +20,14 @@ MODE_MAP = {
     "3": "Backup",
 }
 REVERSE_MODE_MAP = {v: k for k, v in MODE_MAP.items()}
+
+# Tariffa dinamica (app EU): workStatus 2 con touType "1"; la Tariffazione a
+# fasce è workStatus 2 con touType "0"
+DYNAMIC_OPTION = "Tariffa dinamica"
+
+
+def _dynamic_available(data):
+    return str(data.get("dynamicpriceauth")) == "1" or str(data.get("toutype")) == "1"
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -36,12 +45,16 @@ class EpCubeModeSelect(CoordinatorEntity, SelectEntity):
         self.region = entry.data.get("region", "EU")
         self.entity_description = SelectEntityDescription(
             key="workstatus",
-            name="EP CUBE Modalità",
+            translation_key="operating_mode",
             icon="mdi:transmission-tower",
             entity_category=EntityCategory.CONFIG
         )
+        self._attr_has_entity_name = True
         self._attr_unique_id = "epcube_mode_select"
-        self._attr_options = list(MODE_MAP.values())
+        data = (coordinator.data or {}).get("data") or {}
+        self._attr_options = list(MODE_MAP.values()) + (
+            [DYNAMIC_OPTION] if _dynamic_available(data) else []
+        )
         self._attr_device_info = {
             "identifiers": {("epcube", "epcube_device")},
             "name": "EP CUBE",
@@ -50,25 +63,42 @@ class EpCubeModeSelect(CoordinatorEntity, SelectEntity):
 
     @property
     def current_option(self):
-        raw = str(self.coordinator.data["data"].get("workstatus"))
-        return MODE_MAP.get(raw, "Sconosciuto")
+        data = self.coordinator.data["data"]
+        raw = str(data.get("workstatus"))
+        if raw == "2" and str(data.get("toutype")) == "1" and DYNAMIC_OPTION in self.options:
+            return DYNAMIC_OPTION
+        # Valore fuori elenco (es. 6, programma VPP): nessuna opzione
+        return MODE_MAP.get(raw)
 
     async def async_select_option(self, option: str):
-        mode = REVERSE_MODE_MAP.get(option)
+        dynamic = option == DYNAMIC_OPTION
+        mode = "2" if dynamic else REVERSE_MODE_MAP.get(option)
         if not mode:
             _LOGGER.warning("Modalità non valida selezionata: %s", option)
             return
 
         data = self.coordinator.data["data"]
+        current = self.coordinator.data.get("switch_mode") or {}
+
+        # Come l'app EU: la tariffa dinamica richiede un prezzo target
+        if dynamic and not str(current.get("dynamicChargePrice") or "").strip():
+            raise HomeAssistantError(
+                "Per la tariffa dinamica imposta prima il prezzo target "
+                "(entità 'Prezzo target' o app EP Cube)"
+            )
 
         # Payload completo: i campi omessi vengono riportati al default dal
-        # server, cancellando le fasce TOU e i SoC di riserva (issue #18, #31)
-        payload = build_switch_mode_payload(data, work_status=mode)
+        # server, cancellando le fasce TOU e i SoC di riserva (issue #18, #31).
+        # touType come l'app: "1" solo per la tariffa dinamica
+        payload = build_switch_mode_payload(
+            data, work_status=mode, current=current,
+            touType="1" if dynamic else "0",
+        )
 
         # Parametri specifici della modalità di destinazione
         if mode == "2":  # Tariffazione
             payload["evChargerReserveSoc"] = data.get("evchargerreservesoc", 50)
 
-        session = async_get_clientsession(self.hass)
-        if await async_post_switch_mode(session, self.entry, payload, f"modalità {option}"):
-            await self.coordinator.async_request_refresh()
+        if not await async_post_switch_mode(self.hass, self.entry, payload, f"modalità {option}"):
+            raise HomeAssistantError(f"Il server EP Cube ha rifiutato la modalità {option}")
+        await self.coordinator.async_request_refresh()

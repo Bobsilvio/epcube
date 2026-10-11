@@ -30,7 +30,7 @@ Custom Home Assistant integration for monitoring the EP Cube energy storage syst
 - 📅 **TOU service** to manage time-of-use schedules directly from Home Assistant
 - ⚙️ Built-in **configuration and diagnostic entities**
 - 🧩 Fully integrated with the Home Assistant UI (config flow, device info, icons)
-- 🔐 Requires a **valid Bearer token** (token generation via reverse engineering, [HERE](https://epcube-token.streamlit.app/))
+- 🔐 **Sign in with the EP Cube app's email and password**: the login captcha is solved automatically and the token is renewed when it expires. A manually generated Bearer token ([HERE](https://epcube-token.streamlit.app/)) is still supported
 
 ---
 
@@ -51,7 +51,9 @@ Custom Home Assistant integration for monitoring the EP Cube energy storage syst
 ## ⚠️ Requirements
 
 - EP Cube account
-- Bearer token ([HERE](https://github.com/Bobsilvio/epcube-token))
+- Email and password of the EP Cube app (or a Bearer token from [HERE](https://github.com/Bobsilvio/epcube-token))
+
+> The password is stored in Home Assistant's configuration (`.storage/core.config_entries`), like any other integration credential.
 
 ---
 
@@ -86,8 +88,8 @@ For **TOU** mode use `epcube.set_tou_schedule` instead (see next section).
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
 | `mode` | String | Mode: `"1"` = Self-consumption, `"3"` = Backup | `"1"` |
-| `backup_power_reserve_soc` | Number | Backup reserve SoC % (mode=3 only) | `50` |
-| `self_consumption_reserve_soc` | Number | Self-consumption reserve SoC % (mode=1 only) | `5` |
+| `backup_power_reserve_soc` | Number | Backup reserve SoC % (mode=3 only) | current value |
+| `self_consumption_reserve_soc` | Number | Self-consumption reserve SoC % (mode=1 only) | current value |
 | `entry_id` | String | Config entry ID (auto-detected if not specified) | — |
 
 ### Examples
@@ -159,12 +161,18 @@ data:
 | `active_week_non_workday` | List of integers | Weekend/holiday days (6=Sat, 7=Sun) | `[6,7]` |
 | `daylight_active_week` | List of integers | Workday days (DST) | `[1,2,3,4,5]` |
 | `daylight_active_week_non_workday` | List of integers | Weekend days (DST) | `[6,7]` |
-| `tou_type` | Integer | Tariff type | `0` |
-| `self_consumption_reserve_soc` | Integer | Self-consumption reserve SoC % | `5` |
+| `tou_type` | Integer | Tariff type | current value |
+| `self_consumption_reserve_soc` | Integer | Self-consumption reserve SoC % | current value |
 | `allow_charging_from_grid` | Integer | Allow charging from grid (0/1) | preserves current device setting |
 | `daylight_saving_time` | Boolean | Enable daylight saving time support | `false` |
 | `switch_to_mode` | Boolean | Switch to TOU mode after saving | `false` |
 | `entry_id` | String | Config entry ID (auto-detected if not specified) | — |
+
+Mapping to the **TOU time window** screen of the EP Cube app (EU): `off_peak_times` = *low-cost band*, `mid_peak_times` = *normal-cost band*, `peak_times` = *high-cost band*; the `_non_workday` lists and `active_week_non_workday` are the *weekend*, `active_week` the *workdays*. At most **3 slots per type**. On systems where the app uses seasonal tariff plans (gateway firmware 4.0.8 or later, when the server returns plans) the service stops with an error, because the slots would not be used.
+
+The **TOU peak/mid-peak/off-peak start/end (HH:00)** numbers read the hour of the device's first slot and, when changed, update that slot (price and other slots unchanged) without changing mode. If the type has no slot yet, they create a one-hour slot.
+
+The slot lists you pass replace the whole schedule: lists you leave out are emptied. Everything else (reserve SoC values, weather watch, winter mode, EV reserve) keeps its current value. Prices may use a comma (`0,31`): they are sent with a dot, as the app does. An invalid slot stops the call with an error instead of sending a partial schedule.
 
 ### Practical Examples
 
@@ -265,12 +273,93 @@ The integration automatically creates sensors for:
 - **Solar**: Power, energy (AC/DC)
 - **Grid**: Power, energy (imported/exported)
 - **Backup loads**: Power, energy
-- **Main loads**: Power, energy
-- **EV charger**: Power, energy
+- **Non-Backup loads**: Power, energy
+- **EV/Large appliance**: Power, energy
 - **Generator**: Power, energy
-- **Statistics**: Equivalent trees, CO₂ saved
+- **Statistics**: EP Cube contribution ratio (self-sufficiency), reducing deforestation (trees), standard coal saved
 - **TOU configuration**: Time slots, active days, reserve SoC values
 - **Diagnostics**: System status, firmware, connectivity
+- **Revenue**: today and this month, as calculated by the EP Cube cloud
+- **Last power cut**: start time of the last outage, with the last 10 outages in the attributes
+- **Weather**: the forecast shown in the app's home screen
+- **PV strings**: power of each PV string (PV1–PV6), in kW
+
+If something looks wrong, download the diagnostics (Settings → Devices & services → EP Cube → ⋮ → Download diagnostics) and attach it to the issue: credentials, serial numbers and location are redacted.
+
+Sensor names follow the wording of the official EP Cube app.
+
+### Status and settings
+
+| Entity | What it does |
+|---|---|
+| `binary_sensor` **Off-grid** | On during a grid outage (the system runs on battery) |
+| `binary_sensor` **Grid** | On when the grid is present |
+| `binary_sensor` **Winter mode active** | On while the winter mode is charging the battery |
+| `switch` **Winter mode** | Enables winter mode: when temperature and SoC are too low, EP Cube charges to the target SoC |
+| `number` **Winter mode target SoC** | Target SoC for winter mode |
+| `switch` **Weather watch** | Charges the batteries ahead of extreme weather events |
+| `select` **Operating mode** | Self-consumption, Time of use, Backup and, if the system supports it, **Dynamic tariff** |
+| `number` **Target price** / **Target sell price** | Dynamic tariff thresholds (saved without changing mode) |
+| `switch` **Allow charging via grid** | Grid charging (TOU off-peak and Backup mode) |
+| `switch` **Off-grid notification** / `number` **Off-grid notification SoC** | The app notifies you when, during an outage, the battery drops to this SoC |
+| `number` **Sleep mode SoC** | Below this SoC (5–30%) the system enters sleep mode |
+| `switch` **Indicator light** | The light on the right side of the hybrid inverter |
+| `switch` **Automatic firmware update** | Automatic firmware updates |
+| `number` **EV/Large appliance reserve SoC** | Only on systems with an EV charger or large appliance |
+| `sensor` **Last warning** / **Last fault** | Latest entries of the app's "Alert & Warning" page, with the suggested solution |
+| `sensor` **Wi-Fi**, **Firmware** | Gateway Wi-Fi status and firmware versions (diagnostic) |
+
+Winter mode and weather watch entities are created only if the system exposes those settings; winter mode also follows the app's own condition (permission and gateway firmware). Each setting is written the way your region's app does it: in the EU winter mode uses `settingWinterProtect` and grid charging is part of the mode (`switchMode`, sent in full); sleep mode, indicator light and winter mode SoC exist only in the US app. The TOU schedule and reserve SoC values are never touched.
+
+### Detecting a power cut
+
+During an outage (or when the breaker between the grid and EP Cube trips) `status` and `gridLight` both go to **0**, and back to 1 when the grid returns; then `gridPowerFailureNum` increases by one. Seen from the cloud, an outage and a tripped breaker look the same. Use the **Off-grid** binary sensor:
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.epcube_off_grid
+    to: "on"
+```
+
+### What the numeric values mean
+
+Some API fields are numeric codes. The meanings come from the official Android apps (EU 3.1.1 and North America 2.6.2); ✅ marks values also confirmed on a real (EU) system's data, *unverified* those that appear neither in the app nor in the data.
+
+| Field | Value | Meaning |
+|---|---|---|
+| `workStatus` (Operating mode) | 1 | Self-consumption |
+| | 2 | Time of Use |
+| | 3 | Backup |
+| | 6 | Utility VPP program (e.g. Hawaii BYOD+): mode cannot be changed |
+| | 2 + `touType` 1 | *Dynamic tariff* (EU app): charges from the grid below the target price |
+| `systemStatus` (Gateway status) | 1 | Fault |
+| | 2 | Idle ✅ (about a minute on wake-up, in the morning) |
+| | 4 | Running ✅ |
+| | 6 | Low power ✅: sleep mode, at night when the battery reaches its minimum SoC |
+| | 7 | Under protection |
+| | 0, 3, 5 | Self-test, standby, not powered — from EP Cube support, *unverified* |
+| `status` | 0 | Off-grid (grid outage) ✅ |
+| | 1 | Grid-connected ✅ |
+| `touType` | 0 | Time of use with fixed slots (with `workStatus` 2) |
+| | 1 | Dynamic tariff (with `workStatus` 2) |
+| `isOnline` | 1 / 0 | Gateway connected / not connected to the cloud |
+| `isAlert`, `isFault` | 1 / 0 | Warning / fault present — they stay 0 during outages ✅ |
+| `systemSpecialWorkMode` | 6 | Winter mode active ("Backup (winter mode)") |
+| `gridLight` | 1 | Grid present ✅ |
+| | 0 | Grid absent ✅ (changes together with `status`) |
+| `generatorLight` | 1 | Generator running |
+| `evLight` | 2, 4 | EV charger / large appliance active |
+| `backupLoadsMode` (new firmware) / `backUpType` (older firmware) | 0 | Partial backup: some loads are not backed up ("Non-Backup" node in the app) |
+| | 1 | Whole-home backup |
+| `networking` | 3 | 4G |
+| | 0, 1, 2 | Offline, Wi-Fi, Ethernet — *unverified* |
+| `gridPowerFailureNum` | counter | Number of grid outages since installation: it goes up by one **when the grid comes back** ✅. Do not trigger on a fixed value |
+| `offGridPowerSupplyTime` | — | Stays 0 even during outages ✅: it is not the outage duration |
+| `winterProtect` (EU, `getSwitchMode`) | 85 | Winter mode off ✅ |
+| | 170 | Winter mode on (EU app) |
+| `winterProtect` (US, `getSettingsData`) | 0 / 1 | Winter mode off / on |
+| `weatherWatch`, `allowChargingXiaGrid` | "0" / "1" | Off / on |
 
 ---
 

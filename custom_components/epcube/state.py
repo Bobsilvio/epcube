@@ -8,6 +8,9 @@ class EpCubeDataState:
         self.daily_in = 0.0
         self.daily_out = 0.0
         self.last_reset = date.today()
+        # Cache degli endpoint lenti (extras.py)
+        self.extras = None
+        self.extras_at = 0.0
 
     def reset_daily(self):
         self.daily_in = 0.0

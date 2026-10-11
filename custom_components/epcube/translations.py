@@ -22,7 +22,7 @@ FIELD_TRANSLATIONS = {
     # === Batteria ===
     "batterysoc": "SoC Batteria",
     "batterycurrentelectricity": "Energia Batteria",
-    "batterypacknum": "Numero Celle Batteria",
+    "batterypacknum": "Moduli Batteria",
     
     # === Energia Solare ===
     "solarpower": "Potenza Solare",
@@ -55,7 +55,7 @@ FIELD_TRANSLATIONS = {
     
     # === Backup ===
     "backuppower": "Potenza Backup",
-    "backupelectricity": "Energia Backup",
+    "backupelectricity": "Energia Carichi di backup",
     "backupflowpower": "Flusso Potenza Backup",
     "backuppowera": "Potenza Backup Fase A",
     "backuppowerb": "Potenza Backup Fase B",
@@ -65,11 +65,11 @@ FIELD_TRANSLATIONS = {
     
     # === Carico Non-Backup ===
     "nonbackuppower": "Potenza Carico Principale",
-    "nonbackupelectricity": "Energia Carico Principale",
+    "nonbackupelectricity": "Energia Carichi Non-Backup",
     "nonbackupflowpower": "Flusso Carico Principale",
     
     # === Auto Consumo ===
-    "selfhelprate": "Tasso Autoconsumo",
+    "selfhelprate": "Rapporto di contributo EP CUBE",
     "selfconsumptioinreservesoc": "SoC Autoconsumo Riservato",
     "allowchargingxiagrid": "Permetti Ricarica da Rete",
     
@@ -103,8 +103,8 @@ FIELD_TRANSLATIONS = {
     "daylightoffpeaktimelistnonworkday": "Orari Luce Fuori Picco (Non Lavoro)",
     
     # === Sostenibilità ===
-    "treenum": "Alberi Piantati",
-    "coal": "Equivalente Carbone Risparmiato",
+    "treenum": "Riduzione della deforestazione (alberi)",
+    "coal": "Carbone risparmiato",
     "earningyesterday": "Guadagno Ieri",
     
     # === Informazioni Dispositivo ===
@@ -156,6 +156,57 @@ FIELD_TRANSLATIONS = {
     "hybridnum": "Numero Ibridi",
     "dynamicpriceauth": "Prezzo Dinamico Abilitato",
     "softwareversion": "Versione Software",
+
+    # === Campi dell'app Android 2.6.2 ===
+    "chargingpowerfromgridlimit": "Limite potenza ricarica da rete",
+    "drycontactinputdevicetype": "Tipo dispositivo contatto pulito",
+    "dynamicprice": "Prezzo attuale tariffa dinamica",
+    "eebuspromptmsg": "Messaggio EEBUS",
+    "enwgeegenable": "EnWG/EEG abilitato",
+    "heatpumpsettingstip": "Info pompa di calore",
+    "heatpumpworkmode": "Modalità pompa di calore",
+    "homeconnectdevices": "Dispositivi Home Connect",
+    "pvtopowertogridlimits": "Limite immissione FV in rete",
+    "dynamicchargeprice": "Prezzo target tariffa dinamica",
+    "dynamicdischargeprice": "Prezzo target di vendita",
+    "dynamicpricebinding": "Area prezzi tariffa dinamica",
+    "intelligentmodechargingsoc": "SoC carica modalità intelligente",
+    "intelligentmodedischargesoc": "SoC scarica modalità intelligente",
+    "sellingmodedischargesoc": "SoC scarica modalità vendita",
+    "quickchargestatus": "Stato ricarica rapida",
+    "lowelectricitypricetime": "Orario prezzo basso",
+    "evseworkstatus": "Stato caricatore EV (EVSE)",
+    "id": "ID Record Cloud",
+    "filters": "Filtri VPP",
+    "toucurrenttimes": "Fasce TOU Correnti",
+    "tousettings": "Impostazioni TOU (nuova app)",
+    "gridstandard": "Normativa di Rete (codice)",
+    "lpptimeduration": "Durata LPP",
+    "lpctimeduration": "Durata LPC",
+    "wintermode": "Winter Mode",
+    "winterprotect": "Protezione Invernale",
+    "charginglimitsoc": "SoC Limite Ricarica",
+    "hasevse": "Caricatore EV (EVSE) Presente",
+    "evseonline": "Caricatore EV (EVSE) Online",
+    "dynamicpricetips": "Info Prezzo Dinamico",
+    "batterypower": "Potenza Batteria (API)",
+    "dailyelectricitysales": "Vendite Elettricità Giornaliere",
+    "hasev": "EV/Grandi Carichi Presente",
+    "hasgenerator": "Generatore Esterno Presente",
+    "smarthomeelectricity": "Energia Smart Home",
+    "smarthomepower": "Potenza Smart Home",
+    "timeleft": "Tempo rimanente (off-grid)",
+    "vppcode": "Programma VPP",
+    "backupaftermode": "Modalità Dopo il Backup",
+    "backupdurationhour": "Durata Backup (Ore)",
+    "backupdurationminute": "Durata Backup (Minuti)",
+    "backupendtime": "Fine Backup",
+    "exporteverything": "Esporta Tutto",
+    "ja122025enabled": "Modalità JA12 (Title 24)",
+    "ja122025enabledsoc": "SoC Riserva JA12",
+    "ja12effectivedate": "Data Attivazione JA12",
+    "newapptou": "Formato TOU Nuova App",
+    "sellingenable": "Esportazione Solare DC",
 }
 
 # Modalità operative
@@ -191,18 +242,15 @@ SYSTEM_STATUS_OPTIONS = {
     "7": "under_protection",
 }
 
-# Tipo backup
+# Collegamento dei carichi al backup. Nell'app (2.6.2) il valore 0 indica un
+# impianto con carichi non-backup (backup parziale) e fa comparire il nodo
+# "Non-Backup" nel flusso; backUpType è il campo dei firmware precedenti,
+# backupLoadsMode quello dei nuovi. Gli altri valori non sono distinti dall'app
 BACKUP_TYPE = {
-    "0": "Nessuno",
-    "1": "Connesso",
-    "2": "Off-Grid",
+    "0": "Backup parziale (con carichi non-backup)",
+    "1": "Backup intera casa",
 }
-
-# Modalità carico backup
-BACKUP_LOADS_MODE = {
-    "0": "Tutti i carichi",
-    "1": "Solo carichi prioritari",
-}
+BACKUP_LOADS_MODE = BACKUP_TYPE
 
 # Tipo connessione
 NETWORKING_TYPE = {

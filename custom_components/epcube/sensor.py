@@ -1,4 +1,4 @@
-from homeassistant.const import UnitOfEnergy, UnitOfPower, PERCENTAGE
+from homeassistant.const import UnitOfEnergy, UnitOfPower, UnitOfTime, PERCENTAGE
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.util import dt as dt_util
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass, SensorEntityDescription, SensorEntity
@@ -16,14 +16,18 @@ from .const import (
     BATTERY_POWER_DEADBAND_KW
 )
 from .translations import translate_field_name, translate_status_value, SYSTEM_STATUS_OPTIONS
+from .extras import async_fetch_settings, async_fetch_slow_extras, async_fetch_pv_power
 import aiohttp
-import async_timeout
 import asyncio
 import json
 from datetime import timedelta, datetime, date
 
 import logging
 _LOGGER = logging.getLogger(__name__)
+
+# Lunghezza massima di uno stato in Home Assistant
+MAX_STATE_LENGTH = 255
+
 
 def _is_numeric(value):
     """True se il valore è convertibile in float (anche se arriva come stringa)."""
@@ -86,6 +90,20 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         "existssg", "snitems", "rtusn",
         # Valori economici (non dati energetici)
         "earningyesterday", "hasvalue",
+        # Configurazione e programmi (getSwitchMode / homeDeviceInfo)
+        "hasev", "hasgenerator", "newapptou", "vppcode", "exporteverything",
+        "sellingenable", "backupaftermode", "backupdurationhour",
+        "backupdurationminute", "backupendtime",
+        "ja122025enabled", "ja122025enabledsoc", "ja12effectivedate",
+        # Id del record lato cloud e strutture della nuova app (filtri VPP, fasce)
+        "id", "filters", "toucurrenttimes", "tousettings",
+        # Campi del backend EU non usati dall'app Android
+        "chargingpowerfromgridlimit", "pvtopowertogridlimits", "drycontactinputdevicetype",
+        "eebuspromptmsg", "enwgeegenable", "heatpumpsettingstip", "heatpumpworkmode",
+        "homeconnectdevices", "dynamicprice",
+        "gridstandard", "lpptimeduration", "lpctimeduration", "wintermode",
+        "winterprotect", "charginglimitsoc", "hasevse", "evseonline",
+        "dynamicpricetips",
     ]
 
     config_sensors = [
@@ -114,6 +132,11 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         # Diagnostici meno utili
         "toutype", "systemspecialworkmode", "devtype",
         "heatpumpsettingspermission", "homeconnectauth",
+        # Flag interni dell'app e funzioni solo per la California (JA12/Title 24)
+        "id", "filters", "toucurrenttimes", "tousettings",
+        "hasev", "hasgenerator", "newapptou", "dynamicpricetips",
+        "lpptimeduration", "lpctimeduration",
+        "ja122025enabled", "ja122025enabledsoc", "ja12effectivedate",
         # Dati da deviceList — disabilitati di default (info statiche o private)
         "lat", "lon", "addressinfo",
         "isparallel", "hybridnum", "dynamicpriceauth",
@@ -164,7 +187,7 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         # contiene "electricity" (lowElectricityPriceTime) e finirebbe fra i
         # sensori di energia: HA solleva ValueError nel push agli entity e
         # l'eccezione blocca l'aggiornamento di TUTTI i sensori (issue #26)
-        if isinstance(value, str) and not _is_numeric(value):
+        if (isinstance(value, str) and not _is_numeric(value)) or isinstance(value, (list, dict)):
             device_class = None
             unit_of_measurement = None
             state_class = None
@@ -189,9 +212,17 @@ def generate_sensors(data, enable_total=False, enable_annual=False, enable_month
         elif ("flow" in base_key or "power" in base_key) and base_key not in (
             "gridpowerfailurenum", "offgridpowersupplytime",
             "backuppowerreservesoc",
+            # Limiti impostati dall'installatore (app EU): unità non verificata
+            "chargingpowerfromgridlimit", "pvtopowertogridlimits",
         ):
             device_class = SensorDeviceClass.POWER
             unit_of_measurement = UnitOfPower.WATT
+            state_class = SensorStateClass.MEASUREMENT
+
+        # Autonomia residua in blackout: l'app la mostra come ore:minuti
+        elif base_key == "timeleft":
+            device_class = SensorDeviceClass.DURATION
+            unit_of_measurement = UnitOfTime.MINUTES
             state_class = SensorStateClass.MEASUREMENT
 
         # systemStatus = stato del gateway (0-7), esposto come enum tradotto
@@ -273,7 +304,7 @@ async def fetch_device_info(session, token, dev_id, region, timeout=STATS_TIMEOU
     }
 
     try:
-        with async_timeout.timeout(timeout):
+        async with asyncio.timeout(timeout):
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     json_data = await resp.json()
@@ -312,7 +343,7 @@ async def fetch_device_list(session, token, dev_id, region, timeout=STATS_TIMEOU
     }
 
     try:
-        with async_timeout.timeout(timeout):
+        async with asyncio.timeout(timeout):
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     json_data = await resp.json()
@@ -343,7 +374,11 @@ async def fetch_device_list(session, token, dev_id, region, timeout=STATS_TIMEOU
 
 
 async def fetch_switch_mode(session, token, dev_id, region, timeout=STATS_TIMEOUT):
-    """Fetch getSwitchMode e ritorna i dati normalizzati in lowercase."""
+    """Fetch getSwitchMode: dati con le chiavi originali (camelCase).
+
+    Le chiavi originali servono a rispedire la configurazione a switchMode;
+    il merge nei dati del coordinator le porta in minuscolo.
+    """
     base_url = get_base_url(region)
     url = f"{base_url}/device/getSwitchMode?devId={dev_id}"
     headers = {
@@ -355,12 +390,12 @@ async def fetch_switch_mode(session, token, dev_id, region, timeout=STATS_TIMEOU
     }
 
     try:
-        with async_timeout.timeout(timeout):
+        async with asyncio.timeout(timeout):
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     json_data = await resp.json()
-                    raw_data = json_data.get("data", {})
-                    return {k.lower(): v for k, v in raw_data.items()}
+                    raw_data = json_data.get("data") or {}
+                    return dict(raw_data) if isinstance(raw_data, dict) else {}
                 elif resp.status == 401:
                     _LOGGER.error("Token non valido nel fetch switch mode (401)")
                     return {}
@@ -393,7 +428,7 @@ async def fetch_epcube_stats(session, token, dev_id, date_str, scope_type, regio
     }
 
     try:
-        with async_timeout.timeout(timeout):
+        async with asyncio.timeout(timeout):
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     json_data = await resp.json()
@@ -419,18 +454,22 @@ async def fetch_epcube_stats(session, token, dev_id, date_str, scope_type, regio
         _LOGGER.exception("Errore inaspettato nel fetch epcube stats: %s", e)
         return {}
 
+class EpCubeAuthError(UpdateFailed):
+    """Il server ha rifiutato il token (scaduto o di un'altra regione)."""
+
+
 async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, hass, entry_id):
     config_entry = hass.data[DOMAIN][entry_id].get("config_entry")
     region = config_entry.data.get("region", "EU") if config_entry else "EU"
     base_url = get_base_url(region)
     
     try:
-        with async_timeout.timeout(HTTP_TIMEOUT):
+        async with asyncio.timeout(HTTP_TIMEOUT):
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 401:
-                    raise UpdateFailed("Token non valido o scaduto")
+                    raise EpCubeAuthError("Token non valido o scaduto")
                 elif resp.status == 403:
-                    raise UpdateFailed("Accesso negato all'API")
+                    raise EpCubeAuthError("Accesso negato all'API")
                 elif resp.status == 429:
                     raise UpdateFailed("Rate limit raggiunto - riprova più tardi")
                 elif resp.status >= 500:
@@ -448,7 +487,7 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                 if api_status is not None and int(api_status) != 200:
                     api_message = live_data.get("message", "")
                     if int(api_status) in (401, 403):
-                        raise UpdateFailed(f"Token non valido o scaduto: {api_message}")
+                        raise EpCubeAuthError(f"Token non valido o scaduto: {api_message}")
                     raise UpdateFailed(f"Errore API {api_status}: {api_message}")
 
                 full_data_raw = live_data.get("data") or {}
@@ -472,6 +511,9 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                 device_info = {}
                 device_list_info = {}
                 switch_mode_data = {}
+                settings_data = {}
+                pv_data = {}
+                extras_data = {}
                 # Gli endpoint supplementari sono opzionali: se uno è lento o rotto
                 # (es. queryDataElectricityV2 sul cluster JP, issue #27) i dati live
                 # di homeDeviceInfo devono comunque arrivare in Home Assistant.
@@ -486,12 +528,18 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                         fetch_device_info(session, token, real_dev_id, region),
                         fetch_device_list(session, token, real_dev_id, region),
                         fetch_switch_mode(session, token, real_dev_id, region),
+                        async_fetch_settings(session, token, region, real_dev_id),
+                        async_fetch_pv_power(session, token, region, real_dev_id),
+                        async_fetch_slow_extras(
+                            session, token, region, real_dev_id, dev_id_sn,
+                            hass.data[DOMAIN][entry_id]["state"],
+                        ),
                         return_exceptions=True,
                     )
                     labels = (
                         "stats giornaliere", "stats totali", "stats annuali",
                         "stats mensili", "stats ieri", "device info",
-                        "deviceList", "switch mode",
+                        "deviceList", "switch mode", "impostazioni", "stringhe FV", "extra",
                     )
                     clean = []
                     for label, result in zip(labels, results):
@@ -509,13 +557,16 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                         device_info,
                         device_list_info,
                         switch_mode_data,
+                        settings_data,
+                        pv_data,
+                        extras_data,
                     ) = clean
                 except Exception as e:
                     _LOGGER.warning("Errore nel fetch dati supplementari: %s", e)
 
                 # Merge switch mode — sovrascrive homeDeviceInfo per SoC e config TOU
                 for k, v in switch_mode_data.items():
-                    full_data[k] = v
+                    full_data[k.lower()] = v
 
                 # Merge device info (userDeviceInfo)
                 for k in ["activationdata", "warrantydata", "modeltype", "batterycapacity"]:
@@ -582,7 +633,13 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                     except Exception as e:
                         _LOGGER.warning("Errore nel calcolo del SOC cumulativo: %s", e)
 
-                return {"data": full_data}
+                # Impostazioni ed extra restano separati da "data": da lì
+                # generate_sensors crea un sensore per ogni chiave
+                return {
+                    "data": full_data, "settings": settings_data,
+                    "switch_mode": switch_mode_data,
+                    "pv": pv_data, "extras": extras_data,
+                }
 
     except asyncio.TimeoutError:
         raise UpdateFailed("Timeout nella lettura dei dati principali")
@@ -639,6 +696,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EpCubeTouScheduleSensor(coordinator, "daylight_offpeak"),
         EpCubeTouActiveWeeksSensor(coordinator, "workday"),
         EpCubeTouActiveWeeksSensor(coordinator, "non_workday"),
+        # Endpoint dell'app Android (extras.py)
+        EpCubeLastPowerCutSensor(coordinator),
+        EpCubeEarningSensor(coordinator, "earning_today"),
+        EpCubeEarningSensor(coordinator, "earning_month"),
+        EpCubeWeatherSensor(coordinator),
+        EpCubeAlertSensor(coordinator, "warnings", "last_warning"),
+        EpCubeAlertSensor(coordinator, "faults", "last_fault"),
+        EpCubeWifiSensor(coordinator),
+        EpCubeFirmwareSensor(coordinator),
+    ] + [
+        EpCubePvStringSensor(coordinator, key)
+        for key, value in sorted(((coordinator.data or {}).get("pv") or {}).items())
+        if value is not None
     ]
     
 
@@ -654,6 +724,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
             elif entity.unique_id.endswith("_annual") and not enable_annual:
                 disabled_by = RegistryEntryDisabler.INTEGRATION
             elif entity.unique_id.endswith("_monthly") and not enable_monthly:
+                disabled_by = RegistryEntryDisabler.INTEGRATION
+            elif not getattr(entity, "entity_registry_enabled_default", True):
+                # Senza questo la lista disabled_by_default di generate_sensors
+                # restava senza effetto: l'entità veniva registrata attiva
                 disabled_by = RegistryEntryDisabler.INTEGRATION
 
             registry.async_get_or_create(
@@ -696,6 +770,11 @@ class EpCubeSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         value = self.coordinator.data["data"].get(self.entity_description.key)
 
+        if isinstance(value, (list, dict)):
+            # Liste e oggetti (fasce TOU, giorni, filtri VPP): HA rifiuta stati
+            # oltre 255 caratteri, il valore completo resta negli attributi
+            return str(value)[:MAX_STATE_LENGTH]
+
         if value is not None:
             if self.entity_description.device_class == SensorDeviceClass.ENUM:
                 # Valore fuori mappa: None invece di uno stato non dichiarato in options
@@ -721,10 +800,19 @@ class EpCubeSensor(CoordinatorEntity, SensorEntity):
                 return None
         return value
 
+    @property
+    def extra_state_attributes(self):
+        value = self.coordinator.data["data"].get(self.entity_description.key)
+        if isinstance(value, (list, dict)) and len(str(value)) > MAX_STATE_LENGTH:
+            return {"value": value}
+        return None
+
+
 class EpCubeLastUpdateSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator):
         super().__init__(coordinator)
-        self._attr_name = "EP CUBE Ultimo Aggiornamento"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "last_update"
         self._attr_unique_id = "epcube_last_update"
         self._attr_device_class = SensorDeviceClass.TIMESTAMP
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -934,7 +1022,8 @@ class EpCubeTotalLoadPowerSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator):
         super().__init__(coordinator)
         self._attr_unique_id = "epcube_total_load_power"
-        self._attr_name = "Potenza Consumo Totale"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "total_load_power"
         self._attr_device_class = SensorDeviceClass.POWER
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = UnitOfPower.WATT
@@ -962,7 +1051,8 @@ class EpCubeTotalLoadEnergySensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator):
         super().__init__(coordinator)
         self._attr_unique_id = "epcube_total_load_energy"
-        self._attr_name = "Energia Consumo Totale (Oggi)"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "total_load_energy"
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -1092,16 +1182,20 @@ class EpCubeYesterdayLoadSensor(CoordinatorEntity, SensorEntity):
 
 
 def _format_time_range(times_list):
-    """Formatta una lista di intervalli orari in stringa leggibile."""
-    if not times_list or len(times_list) == 0:
-        return "Non configurato"
-    
+    """Fasce TOU "HH:MM_HH:MM_prezzo" in testo leggibile: "16:00-17:00 (0.31)".
+
+    Come l'app, le voci "00:00_00:00" sono segnaposto vuoti e vengono ignorate.
+    """
     formatted = []
-    for interval in times_list:
-        if isinstance(interval, (list, tuple)) and len(interval) >= 2:
-            start, end = interval[0], interval[1]
-            formatted.append(f"{int(start):02d}:00-{int(end):02d}:00")
-    
+    for interval in times_list or []:
+        parts = str(interval).split("_")
+        if len(parts) < 2 or not parts[0] or not parts[1]:
+            continue
+        if parts[0] == parts[1] == "00:00":
+            continue
+        price = parts[2] if len(parts) > 2 and parts[2] else None
+        formatted.append(f"{parts[0]}-{parts[1]}" + (f" ({price})" if price else ""))
+
     return ", ".join(formatted) if formatted else "Non configurato"
 
 
@@ -1115,37 +1209,31 @@ class EpCubeTouScheduleSensor(CoordinatorEntity, SensorEntity):
         # Mapping tipo TOU -> info
         self.tou_info = {
             "peak": {
-                "name": "Orari di Picco",
                 "unique_id": "epcube_tou_peak_times",
                 "key": "peaktimelist",
                 "icon": "mdi:flash"
             },
             "midpeak": {
-                "name": "Orari Semi-Picco",
                 "unique_id": "epcube_tou_midpeak_times",
                 "key": "midpeaktimelist",
                 "icon": "mdi:flash-outline"
             },
             "offpeak": {
-                "name": "Orari Fuori Picco",
                 "unique_id": "epcube_tou_offpeak_times",
                 "key": "offpeaktimelist",
                 "icon": "mdi:moon-waxing-crescent"
             },
             "daylight_peak": {
-                "name": "Orari Luce - Picco",
                 "unique_id": "epcube_tou_daylight_peak_times",
                 "key": "daylightpeaktimelist",
                 "icon": "mdi:sun-clock"
             },
             "daylight_midpeak": {
-                "name": "Orari Luce - Semi-Picco",
                 "unique_id": "epcube_tou_daylight_midpeak_times",
                 "key": "daylightmidpeaktimelist",
                 "icon": "mdi:sun-clock-outline"
             },
             "daylight_offpeak": {
-                "name": "Orari Luce - Fuori Picco",
                 "unique_id": "epcube_tou_daylight_offpeak_times",
                 "key": "daylightoffpeaktimelist",
                 "icon": "mdi:moon-new"
@@ -1153,7 +1241,8 @@ class EpCubeTouScheduleSensor(CoordinatorEntity, SensorEntity):
         }
         
         info = self.tou_info[tou_type]
-        self._attr_name = info["name"]
+        self._attr_has_entity_name = True
+        self._attr_translation_key = info["unique_id"].removeprefix("epcube_")
         self._attr_unique_id = info["unique_id"]
         self._attr_icon = info["icon"]
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -1192,12 +1281,14 @@ class EpCubeTouActiveWeeksSensor(CoordinatorEntity, SensorEntity):
         }
         
         if week_type == "workday":
-            self._attr_name = "Giorni Attivi - Lavorativi"
+            self._attr_has_entity_name = True
+            self._attr_translation_key = "tou_active_week"
             self._attr_unique_id = "epcube_tou_active_week"
             self._attr_icon = "mdi:calendar-week"
             self.key = "activeweek"
         else:  # non_workday
-            self._attr_name = "Giorni Attivi - Festivi"
+            self._attr_has_entity_name = True
+            self._attr_translation_key = "tou_active_week_nonworkday"
             self._attr_unique_id = "epcube_tou_active_week_nonworkday"
             self._attr_icon = "mdi:calendar-remove"
             self.key = "activeweeknonworkday"
@@ -1220,3 +1311,228 @@ class EpCubeTouActiveWeeksSensor(CoordinatorEntity, SensorEntity):
         
         day_names = [self.day_names.get(d, f"Giorno {d}") for d in days]
         return ", ".join(day_names)
+
+
+class EpCubeExtrasSensor(CoordinatorEntity, SensorEntity):
+    """Sensore su un valore di coordinator.data["extras"] (vedi extras.py)."""
+
+    _attr_has_entity_name = True
+    extras_key = None
+
+    def __init__(self, coordinator, key):
+        super().__init__(coordinator)
+        self._attr_translation_key = key
+        self._attr_unique_id = f"epcube_{key}"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def _extra(self):
+        extras = (self.coordinator.data or {}).get("extras") or {}
+        return extras.get(self.extras_key)
+
+    @property
+    def available(self):
+        return super().available and self._extra is not None
+
+
+class EpCubeLastPowerCutSensor(EpCubeExtrasSensor):
+    """Ultimo blackout dal registro getDevPowerCutLog; i precedenti negli attributi."""
+
+    extras_key = "power_cuts"
+    _attr_icon = "mdi:transmission-tower-off"
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator, "last_power_cut")
+
+    @property
+    def native_value(self):
+        # Registro vuoto (nessun blackout): disponibile ma senza valore
+        if not self._extra:
+            return None
+        return self._extra[0].get("startTime")
+
+    @property
+    def extra_state_attributes(self):
+        events = self._extra or []
+        last = events[0] if events else {}
+        return {
+            "end_time": last.get("endTime"),
+            "duration": last.get("duration"),
+            "events": [
+                {
+                    "start_time": event.get("startTime"),
+                    "end_time": event.get("endTime"),
+                    "duration": event.get("duration"),
+                }
+                for event in events
+            ],
+        }
+
+
+class EpCubeEarningSensor(EpCubeExtrasSensor):
+    """Guadagno calcolato dal cloud (earningsGraph), con la valuta dell'impianto."""
+
+    _attr_icon = "mdi:cash"
+
+    def __init__(self, coordinator, key):
+        super().__init__(coordinator, key)
+        self.extras_key = key
+
+    @property
+    def native_value(self):
+        return self._extra
+
+    @property
+    def native_unit_of_measurement(self):
+        data = (self.coordinator.data or {}).get("data") or {}
+        unit = data.get("unitdefault")
+        return unit if isinstance(unit, str) and unit else None
+
+
+class EpCubeWeatherSensor(EpCubeExtrasSensor):
+    """Meteo che l'app mostra nella Home (homeDeviceInfoWeather)."""
+
+    extras_key = "weather"
+    _attr_icon = "mdi:weather-partly-cloudy"
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator, "weather")
+
+    @property
+    def native_value(self):
+        weather = self._extra or {}
+        return weather.get("description") or weather.get("main")
+
+    @property
+    def extra_state_attributes(self):
+        weather = self._extra or {}
+        return {
+            "condition": weather.get("main"),
+            "temperature": weather.get("temp") or weather.get("weatherTemp"),
+            "temperature_min": weather.get("tempMin"),
+            "temperature_max": weather.get("tempMax"),
+            "icon_code": weather.get("icon"),
+        }
+
+
+class EpCubePvStringSensor(CoordinatorEntity, SensorEntity):
+    """Potenza di una stringa FV (getSolarPvPower), in kW come nell'app."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
+    _attr_icon = "mdi:solar-panel"
+
+    def __init__(self, coordinator, key):
+        super().__init__(coordinator)
+        self._key = key
+        number = key.removeprefix("pv").removesuffix("power")
+        self._attr_translation_key = "pv_string_power"
+        self._attr_translation_placeholders = {"number": number}
+        self._attr_unique_id = f"epcube_{key}"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def available(self):
+        pv = (self.coordinator.data or {}).get("pv") or {}
+        return super().available and pv.get(self._key) is not None
+
+    @property
+    def native_value(self):
+        pv = (self.coordinator.data or {}).get("pv") or {}
+        value = pv.get(self._key)
+        try:
+            return round(float(value), 3)
+        except (TypeError, ValueError):
+            return None
+
+
+class EpCubeAlertSensor(EpCubeExtrasSensor):
+    """Ultimo avviso o guasto (getAlertFaultList), testo e soluzione in inglese."""
+
+    _attr_icon = "mdi:alert-circle-outline"
+
+    def __init__(self, coordinator, extras_key, key):
+        super().__init__(coordinator, key)
+        self.extras_key = extras_key
+
+    @property
+    def native_value(self):
+        # Elenco vuoto: nessun avviso, il sensore resta senza valore
+        if not self._extra:
+            return None
+        content = self._extra[0].get("enContent") or ""
+        return content[:255] or None
+
+    @property
+    def extra_state_attributes(self):
+        events = self._extra or []
+        last = events[0] if events else {}
+        return {
+            "start_time": last.get("startTime") or last.get("startDate"),
+            "end_time": last.get("endTime") or last.get("endDate"),
+            "solution": last.get("enSolution"),
+            "events": [
+                {
+                    "content": event.get("enContent"),
+                    "start_time": event.get("startTime") or event.get("startDate"),
+                    "end_time": event.get("endTime") or event.get("endDate"),
+                }
+                for event in events
+            ],
+        }
+
+
+class EpCubeWifiSensor(EpCubeExtrasSensor):
+    """Stato del Wi-Fi del gateway (netWorkInfo)."""
+
+    extras_key = "network"
+    _attr_icon = "mdi:wifi"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator, "wifi")
+
+    @property
+    def native_value(self):
+        network = self._extra or {}
+        return network.get("wifiStatusStr") or network.get("wifiStatus")
+
+    @property
+    def extra_state_attributes(self):
+        network = self._extra or {}
+        return {"ssid": network.get("wifiName"), "status_code": network.get("wifiStatus")}
+
+
+class EpCubeFirmwareSensor(EpCubeExtrasSensor):
+    """Versioni firmware di gateway e RTU (queryFirmwareInfo)."""
+
+    extras_key = "firmware"
+    _attr_icon = "mdi:chip"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator, "firmware")
+
+    @property
+    def native_value(self):
+        return (self._extra or {}).get("firmwareVersion")
+
+    @property
+    def extra_state_attributes(self):
+        firmware = self._extra or {}
+        return {
+            "rtu_version": firmware.get("rtuVersion"),
+            "auto_update": firmware.get("aotuUpdateFirmware"),
+        }

@@ -1,5 +1,110 @@
 # Changelog
 
+## v1.7.0
+
+### Added
+- **Sign in with email and password**: the setup now offers the EP Cube app's
+  credentials as the main option. The integration solves the login captcha by
+  itself (same flow as [epcube-token](https://github.com/Bobsilvio/epcube-token),
+  without opencv) and stores the resulting token.
+- **Automatic token renewal**: when the server rejects the token (401/403) the
+  integration logs in again with the stored credentials and retries, both for
+  polling and for writes. A failed captcha is retried on the next poll, at most
+  once a minute.
+- **Reauthentication flow**: if the credentials are rejected, or a pasted token
+  expires and no credentials are stored, Home Assistant asks to sign in again
+  instead of failing silently. Existing token-only installs can also add email
+  and password from the integration options.
+
+- **Winter mode and weather watch**: new `switch` entities, plus a `number`
+  for the winter mode target SoC. They read `/device/getSettingsData` and write
+  through `/device/saveSettings`, the endpoints of the official app's settings
+  page. Created only when the system exposes those settings.
+- **Binary sensors**: off-grid (grid outage), grid present, winter mode active.
+- **Revenue, last power cut and weather sensors**, from `earningsGraph`,
+  `getDevPowerCutLog` and `homeDeviceInfoWeather`, refreshed every 15 minutes.
+- **Per-string PV power** (PV1–PV6, kW) from `getSolarPvPower`, for the
+  strings the system reports.
+- **Dynamic tariff** (EU app): new "Tariffa dinamica" option in the operating
+  mode select, shown when the system supports it, plus numbers for the target
+  buy and sell prices. Mode codes come from the official EU app 3.1.1:
+  dynamic tariff is `workStatus` 2 with `touType` "1".
+- **More settings**: sleep mode SoC, off-grid notification (and its SoC),
+  indicator light, automatic firmware update, EV/large appliance reserve SoC.
+- **Last warning / last fault sensors** from the app's "Alert & Warning" page,
+  plus Wi-Fi and firmware diagnostic sensors.
+- **Translated names for every entity**: the operating mode select, the SoC
+  and TOU numbers and the TOU sensors had fixed Italian names (some shown as
+  "EPCUBE EPCUBE ..."). Entity IDs and select options are unchanged.
+- **Diagnostics download**: besides the coordinator data it queries once the
+  app endpoints not integrated yet (alarms, network, firmware, warranty, ...),
+  so their real responses can be checked. Credentials, token, serial numbers
+  and location are redacted.
+- **Names for every field the API returns**: fields that showed up with their
+  raw API key (`gridstandard`, `timeleft`, `smarthomepower`, ...) now have a
+  name. Objects and lists (`filters`, `touSettings`) are no longer turned into
+  sensors.
+- **README table of numeric codes**: what `workStatus`, `systemStatus`,
+  `status`, `gridLight`, `backupLoadsMode`, `networking` and the other numeric
+  fields mean, taken from the official Android app.
+
+### Fixed
+- **TOU service could reset other settings**: `set_tou_schedule` built its own
+  partial `switchMode` payload, so every call dropped the backup reserve SoC and
+  reset the self-consumption reserve to 5% unless passed explicitly. It now
+  sends the full current configuration, like the other write paths.
+- **`set_operating_mode` dropped the other reserve SoC** (e.g. switching to
+  self-consumption reset the backup reserve).
+- **Every mode/SoC change turned weather watch off**: the `switchMode` payload
+  always sent `weatherWatch: "0"`. All `switchMode` writes now echo back the
+  whole configuration read from `getSwitchMode` (including EV reserve, winter
+  mode and charging limit on the EU backend), changing only what was asked.
+- **TOU schedule sensors always showed "Non configurato"**: they expected a
+  different format than the `HH:MM_HH:MM_price` strings the API returns.
+- **TOU prices with a decimal comma** (`0,30`) were sent as-is; they are now
+  normalized to a dot like the app does, and malformed slots are rejected with
+  an error shown in Home Assistant instead of only a log line. Service failures
+  are now reported to the caller.
+- **Data not loading on recent Home Assistant versions**: the API calls used
+  `async_timeout` as a plain context manager, which recent versions of the
+  library reject and current Home Assistant no longer ships. They now use
+  `asyncio.timeout`.
+- **`backupLoadsMode` / `backUpType` mapping was inverted**: 0 means partial
+  backup (some loads are not backed up), 1 whole-home backup.
+- **Misleading sensor names**: `selfhelprate` is the EP Cube contribution ratio
+  (self-sufficiency), not the self-consumption rate; `coal` is standard coal
+  saved, not CO₂; `batterypacknum` counts battery modules, not cells. Names now
+  follow the official app (entity IDs are unchanged).
+- Writes that the server rejects inside an HTTP 200 response are now reported
+  as failures instead of successes.
+
+- **TOU hour numbers did nothing**: the "TOU ... (HH:00)" numbers only kept a
+  local value. They now show the hour of the device's first slot and update
+  that slot when changed.
+- **Sensors meant to be disabled by default were created enabled**: the
+  registry pre-creation ignored the integration's default. Only affects newly
+  created entities.
+- **List and object values** (TOU slots, active days, VPP filters) stay
+  sensors as before; states longer than Home Assistant's 255-character limit
+  are truncated, with the full value in an attribute.
+
+### Changed
+- `set_tou_schedule` follows the app: at most 3 slots per type, and it refuses
+  to write slots on systems that use the app's seasonal tariff plans.
+- **EU winter mode** uses the EU app's own endpoint (`settingWinterProtect`,
+  values 170 on / 85 off), and grid charging is saved through `switchMode` in
+  the EU as the EU app does (the US app uses `saveSettings`).
+- Winter mode entities follow the visibility rule of the app for the system's
+  region (EU: single-phase systems with gateway firmware 1.1.8 or later).
+- Mode changes set `touType` like the app, so leaving the dynamic tariff
+  really switches it off.
+- The "allow charging from grid" switch now writes only its own setting
+  (`saveSettings` type 10) instead of the full `switchMode` payload.
+- The `set_tou_schedule` and `set_operating_mode` services now use the shared
+  `switchMode` writer, and honour a token updated through the options flow.
+- New requirements: `numpy` and `Pillow` (both already shipped with Home
+  Assistant).
+
 ## v1.6.2
 
 ### Fixed

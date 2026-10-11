@@ -8,6 +8,6 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/Bobsilvio/epcube/issues",
   "loggers": ["epcube"],
-  "requirements": [],
-  "version": "1.6.2"
+  "requirements": ["numpy>=1.26.0", "Pillow>=10.0.0"],
+  "version": "1.7.0"
 }

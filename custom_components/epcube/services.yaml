@@ -123,7 +123,7 @@ set_tou_schedule:
         boolean:
     tou_type:
       name: Tipo Tariffazione
-      description: Tipo di tariffazione (default 0)
+      description: "Tipo di tariffazione (default: mantieni impostazione attuale)"
       example: "0"
       required: false
       selector:
@@ -132,7 +132,7 @@ set_tou_schedule:
           max: 10
     self_consumption_reserve_soc:
       name: SoC Riserva Autoconsumo
-      description: "Percentuale SoC minima di riserva autoconsumo (default: 5)"
+      description: "Percentuale SoC minima di riserva autoconsumo (default: mantieni impostazione attuale)"
       example: "5"
       required: false
       selector:
@@ -180,7 +180,7 @@ set_operating_mode:
               value: "3"
     backup_power_reserve_soc:
       name: SoC Riserva Backup
-      description: "Percentuale SoC riservata per il backup (solo mode=3, default: 50)"
+      description: "Percentuale SoC riservata per il backup (solo mode=3, default: mantieni impostazione attuale)"
       example: "54"
       required: false
       selector:
@@ -190,7 +190,7 @@ set_operating_mode:
           unit_of_measurement: "%"
     self_consumption_reserve_soc:
       name: SoC Riserva Autoconsumo
-      description: "Percentuale SoC minima autoconsumo (solo mode=1, default: 5)"
+      description: "Percentuale SoC minima autoconsumo (solo mode=1, default: mantieni impostazione attuale)"
       example: "5"
       required: false
       selector:

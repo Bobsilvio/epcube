@@ -4,13 +4,38 @@ from homeassistant.core import callback
 import aiohttp
 import asyncio
 import logging
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     DOMAIN, DEFAULT_SCAN_INTERVAL, CONF_SCALE_POWER,
     CONF_ENABLE_TOTAL, CONF_ENABLE_ANNUAL, CONF_ENABLE_MONTHLY, get_base_url,
-    USER_AGENT, HTTP_TIMEOUT, HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY
+    USER_AGENT, HTTP_TIMEOUT, HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY,
+    CONF_USERNAME, CONF_PASSWORD,
 )
+from .auth import async_login, InvalidCredentials, CaptchaFailed, EpCubeLoginError
 
 _LOGGER = logging.getLogger(__name__)
+
+REGIONS = ["EU", "US", "JP"]
+
+
+async def _async_login_errors(hass, region, username, password, errors):
+    """Login con email e password: token, oppure None con l'errore in errors."""
+    try:
+        return await async_login(async_get_clientsession(hass), region, username, password)
+    except InvalidCredentials as err:
+        _LOGGER.error("Login EP Cube rifiutato: %s", err)
+        errors["base"] = "invalid_auth"
+    except CaptchaFailed as err:
+        _LOGGER.error("Login EP Cube: %s", err)
+        errors["base"] = "captcha_failed"
+    except EpCubeLoginError as err:
+        _LOGGER.error("Login EP Cube: %s", err)
+        errors["base"] = "connection_error"
+    except Exception:
+        _LOGGER.exception("Errore inatteso nel login EP Cube")
+        errors["base"] = "unknown_error"
+    return None
+
 
 class EpCubeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
@@ -19,6 +44,35 @@ class EpCubeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._errors = {}
 
     async def async_step_user(self, user_input=None):
+        return self.async_show_menu(step_id="user", menu_options=["credentials", "token"])
+
+    async def async_step_credentials(self, user_input=None):
+        self._errors = {}
+
+        if user_input is not None:
+            region = user_input["region"]
+            username = user_input[CONF_USERNAME].strip()
+            password = user_input[CONF_PASSWORD]
+            token = await _async_login_errors(self.hass, region, username, password, self._errors)
+            if token:
+                result = await self._async_create_for_token(token, region, {
+                    CONF_USERNAME: username,
+                    CONF_PASSWORD: password,
+                })
+                if result:
+                    return result
+
+        return self.async_show_form(
+            step_id="credentials",
+            data_schema=vol.Schema({
+                vol.Required(CONF_USERNAME): str,
+                vol.Required(CONF_PASSWORD): str,
+                vol.Required("region", default="EU"): vol.In(REGIONS),
+            }),
+            errors=self._errors,
+        )
+
+    async def async_step_token(self, user_input=None):
         self._errors = {}
 
         if user_input is not None:
@@ -26,32 +80,77 @@ class EpCubeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             token = user_input["token"].strip()
             if not token.startswith("Bearer "):
                 token = f"Bearer {token}"
-
-            sn = await self._get_sn_from_token(token, region)
-
-            if not sn:
-                # _get_sn_from_token ha già impostato l'errore specifico
-                self._errors.setdefault("base", "sn_not_found")
-            else:
-                for entry in self._async_current_entries():
-                    if entry.data.get("sn") == sn:
-                        return self.async_abort(reason="already_configured")
-
-                await self.async_set_unique_id(sn)
-                return self.async_create_entry(
-                    title=f"EpCube {sn}",
-                    data={
-                        "token": token,
-                        "sn": sn,
-                        "region": region
-                    },
-                )
+            result = await self._async_create_for_token(token, region, {})
+            if result:
+                return result
 
         return self.async_show_form(
-            step_id="user",
+            step_id="token",
             data_schema=vol.Schema({
                 vol.Required("token"): str,
-                vol.Required("region", default="EU"): vol.In(["EU", "US", "JP"]),
+                vol.Required("region", default="EU"): vol.In(REGIONS),
+            }),
+            errors=self._errors,
+        )
+
+    async def _async_create_for_token(self, token, region, extra_data):
+        """Crea la entry per il dispositivo del token, None se c'è un errore."""
+        sn = await self._get_sn_from_token(token, region)
+
+        if not sn:
+            # _get_sn_from_token ha già impostato l'errore specifico
+            self._errors.setdefault("base", "sn_not_found")
+            return None
+
+        for entry in self._async_current_entries():
+            if entry.data.get("sn") == sn:
+                return self.async_abort(reason="already_configured")
+
+        await self.async_set_unique_id(sn)
+        return self.async_create_entry(
+            title=f"EpCube {sn}",
+            data={
+                "token": token,
+                "sn": sn,
+                "region": region,
+                **extra_data,
+            },
+        )
+
+    async def async_step_reauth(self, entry_data):
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input=None):
+        """Token scaduto o credenziali cambiate: nuovo login con email e password."""
+        self._errors = {}
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        region = entry.options.get("region") or entry.data.get("region", "EU")
+
+        if user_input is not None:
+            username = user_input[CONF_USERNAME].strip()
+            password = user_input[CONF_PASSWORD]
+            token = await _async_login_errors(self.hass, region, username, password, self._errors)
+            if token:
+                sn = await self._get_sn_from_token(token, region)
+                if sn and sn != entry.data.get("sn"):
+                    self._errors["base"] = "wrong_account"
+                elif sn:
+                    if "token" in entry.options:
+                        self.hass.config_entries.async_update_entry(
+                            entry, options={**entry.options, "token": token}
+                        )
+                    return self.async_update_reload_and_abort(entry, data={
+                        **entry.data,
+                        "token": token,
+                        CONF_USERNAME: username,
+                        CONF_PASSWORD: password,
+                    })
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({
+                vol.Required(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, "")): str,
+                vol.Required(CONF_PASSWORD): str,
             }),
             errors=self._errors,
         )
@@ -157,28 +256,56 @@ class EpCubeOptionsFlow(config_entries.OptionsFlow):
         self._config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
+        errors = {}
+        entry = self._config_entry
+
         if user_input is not None:
             token = user_input.get("token", "").strip()
             if not token.startswith("Bearer "):
                 token = f"Bearer {token}"
-            return self.async_create_entry(title="", data={
-                "token": token,
-                "scan_interval": user_input.get("scan_interval", DEFAULT_SCAN_INTERVAL),
-                CONF_SCALE_POWER: user_input.get(CONF_SCALE_POWER, False),
-                CONF_ENABLE_TOTAL: user_input.get(CONF_ENABLE_TOTAL, False),
-                CONF_ENABLE_ANNUAL: user_input.get(CONF_ENABLE_ANNUAL, False),
-                CONF_ENABLE_MONTHLY: user_input.get(CONF_ENABLE_MONTHLY, False),
-                "region": user_input.get("region", self._config_entry.data.get("region", "EU")),
-            })
+            region = user_input.get("region", entry.data.get("region", "EU"))
+
+            # Password inserita: nuovo login, così il token si rinnova da solo
+            password = user_input.get(CONF_PASSWORD)
+            username = (user_input.get(CONF_USERNAME) or "").strip()
+            if password:
+                if not username:
+                    errors["base"] = "missing_username"
+                else:
+                    new_token = await _async_login_errors(
+                        self.hass, region, username, password, errors
+                    )
+                    if new_token:
+                        token = new_token
+                        self.hass.config_entries.async_update_entry(entry, data={
+                            **entry.data,
+                            "token": token,
+                            CONF_USERNAME: username,
+                            CONF_PASSWORD: password,
+                        })
+
+            if not errors:
+                return self.async_create_entry(title="", data={
+                    "token": token,
+                    "scan_interval": user_input.get("scan_interval", DEFAULT_SCAN_INTERVAL),
+                    CONF_SCALE_POWER: user_input.get(CONF_SCALE_POWER, False),
+                    CONF_ENABLE_TOTAL: user_input.get(CONF_ENABLE_TOTAL, False),
+                    CONF_ENABLE_ANNUAL: user_input.get(CONF_ENABLE_ANNUAL, False),
+                    CONF_ENABLE_MONTHLY: user_input.get(CONF_ENABLE_MONTHLY, False),
+                    "region": region,
+                })
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
-                vol.Optional("token", default=self._config_entry.data.get("token")): str,
-                vol.Optional("scan_interval", default=self._config_entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)): int,
-                vol.Optional(CONF_ENABLE_TOTAL, default=self._config_entry.options.get(CONF_ENABLE_TOTAL, False)): bool,
-                vol.Optional(CONF_ENABLE_ANNUAL, default=self._config_entry.options.get(CONF_ENABLE_ANNUAL, False)): bool,
-                vol.Optional(CONF_ENABLE_MONTHLY, default=self._config_entry.options.get(CONF_ENABLE_MONTHLY, False)): bool,
-                vol.Optional("region", default=self._config_entry.data.get("region", "EU")): vol.In(["EU", "US", "JP"]),
-            })
+                vol.Optional(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, "")): str,
+                vol.Optional(CONF_PASSWORD): str,
+                vol.Optional("token", default=entry.options.get("token") or entry.data.get("token")): str,
+                vol.Optional("scan_interval", default=entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)): int,
+                vol.Optional(CONF_ENABLE_TOTAL, default=entry.options.get(CONF_ENABLE_TOTAL, False)): bool,
+                vol.Optional(CONF_ENABLE_ANNUAL, default=entry.options.get(CONF_ENABLE_ANNUAL, False)): bool,
+                vol.Optional(CONF_ENABLE_MONTHLY, default=entry.options.get(CONF_ENABLE_MONTHLY, False)): bool,
+                vol.Optional("region", default=entry.data.get("region", "EU")): vol.In(REGIONS),
+            }),
+            errors=errors,
         )

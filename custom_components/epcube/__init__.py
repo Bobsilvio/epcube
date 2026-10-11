@@ -1,18 +1,21 @@
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError, ServiceValidationError
 from .const import (
-    DOMAIN, PLATFORMS, DEFAULT_SCAN_INTERVAL, get_base_url,
-    USER_AGENT, HTTP_TIMEOUT, HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY
+    DOMAIN, PLATFORMS, DEFAULT_SCAN_INTERVAL, get_base_url, USER_AGENT,
 )
-from .sensor import async_update_data_with_stats
+from .sensor import async_update_data_with_stats, EpCubeAuthError
 from .state import EpCubeDataState
 from .entity import async_migrate_entry_identifiers
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from .api import async_post_switch_mode, entry_token
+from .payload import build_switch_mode_payload
+from .entity import tou_slots_supported
+from .auth import async_refresh_token, has_credentials, InvalidCredentials
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from datetime import timedelta, datetime
-import aiohttp
-import asyncio
 import logging
+import re
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,27 +26,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
 
-    token = entry.options.get("token") or entry.data["token"]
     sn = entry.data["sn"]
     region = entry.options.get("region") or entry.data.get("region", "EU")
     scan_interval = entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)
 
     session = async_get_clientsession(hass)
     base_url = get_base_url(region)
-    headers = {
-        "accept": "*/*",
-        "accept-language": "it-IT",
-        "accept-encoding": "gzip, deflate, br",
-        "user-agent": USER_AGENT,
-        "authorization": token
-    }
 
     state = EpCubeDataState()
 
-    async def async_update_data():
+    async def async_fetch():
+        # Token letto a ogni giro: può essere stato rinnovato nel frattempo
+        token = entry_token(entry)
+        headers = {
+            "accept": "*/*",
+            "accept-language": "it-IT",
+            "accept-encoding": "gzip, deflate, br",
+            "user-agent": USER_AGENT,
+            "authorization": token
+        }
         today_str = datetime.now().strftime("%Y-%m-%d")
         url = f"{base_url}/device/homeDeviceInfo?dayMonthYearFormat={today_str}&sgSn={sn}"
         return await async_update_data_with_stats(session, url, headers, sn, token, hass=hass, entry_id=entry.entry_id)
+
+    async def async_update_data():
+        try:
+            return await async_fetch()
+        except EpCubeAuthError as err:
+            if not has_credentials(entry):
+                # Solo token: serve un nuovo token o le credenziali (reauth)
+                raise ConfigEntryAuthFailed(str(err)) from err
+            try:
+                new_token = await async_refresh_token(hass, entry)
+            except InvalidCredentials as login_err:
+                raise ConfigEntryAuthFailed(f"Credenziali rifiutate: {login_err}") from login_err
+            if not new_token:
+                raise UpdateFailed(f"{err} (rinnovo del token non riuscito, riprovo più tardi)") from err
+        try:
+            return await async_fetch()
+        except EpCubeAuthError as err:
+            raise ConfigEntryAuthFailed(f"Token rifiutato anche dopo un nuovo login: {err}") from err
 
     coordinator = DataUpdateCoordinator(
         hass,
@@ -117,194 +139,63 @@ async def async_set_tou_schedule(hass: HomeAssistant, call):
     - daylight_active_week: Giorni luce lavorativi (opzionale, default [1,2,3,4,5])
     - daylight_active_week_non_workday: Giorni luce non lavorativi (opzionale, default [6,7])
     - tou_type: Tipo tariffazione (opzionale, default 0)
-    - self_consumption_reserve_soc: SoC riserva autoconsumo % (opzionale, default 5)
-    - allow_charging_from_grid: Permetti ricarica da rete 0/1 (opzionale, default 0)
+    - self_consumption_reserve_soc: SoC riserva autoconsumo % (opzionale, default: valore attuale)
+    - allow_charging_from_grid: Permetti ricarica da rete 0/1 (opzionale, default: valore attuale)
     - daylight_saving_time: Ora legale true/false (opzionale, default false)
     - switch_to_mode: Passare a modalità Tariffazione (opzionale, default false)
     """
-    
-    def _validate_time_list(name, entries):
-        """Valida che ogni entry abbia inizio E fine nel formato HH:MM_HH:MM[_prezzo]."""
-        for entry in entries:
-            parts = str(entry).split("_")
-            if len(parts) < 2 or not parts[0] or not parts[1]:
-                _LOGGER.error(
-                    "Formato orario TOU non valido in '%s': '%s'. "
-                    "Formato richiesto: 'HH:MM_HH:MM_prezzo' (es. '08:00_12:00_0.31')",
-                    name, entry
-                )
-                return False
-        return True
 
-    # Estrai parametri
-    entry_id = call.data.get("entry_id")
-    peak_times = call.data.get("peak_times", [])
-    mid_peak_times = call.data.get("mid_peak_times", [])
-    off_peak_times = call.data.get("off_peak_times", [])
-    daylight_peak_times = call.data.get("daylight_peak_times", [])
-    daylight_mid_peak_times = call.data.get("daylight_mid_peak_times", [])
-    daylight_off_peak_times = call.data.get("daylight_off_peak_times", [])
-    active_week = call.data.get("active_week", [1, 2, 3, 4, 5])
-    active_week_non_workday = call.data.get("active_week_non_workday", [6, 7])
-    switch_to_mode = call.data.get("switch_to_mode", False)
+    coordinator, config_entry = _get_entry_coordinator(hass, call.data.get("entry_id"))
+    data = coordinator.data["data"]
 
-    # Valida tutti i time list non vuoti
-    time_lists_to_validate = [
-        ("peak_times", peak_times),
-        ("mid_peak_times", mid_peak_times),
-        ("off_peak_times", off_peak_times),
-        ("peak_times_non_workday", call.data.get("peak_times_non_workday", [])),
-        ("mid_peak_times_non_workday", call.data.get("mid_peak_times_non_workday", [])),
-        ("off_peak_times_non_workday", call.data.get("off_peak_times_non_workday", [])),
-        ("daylight_peak_times", daylight_peak_times),
-        ("daylight_mid_peak_times", daylight_mid_peak_times),
-        ("daylight_off_peak_times", daylight_off_peak_times),
-    ]
-    for list_name, entries in time_lists_to_validate:
-        if entries and not _validate_time_list(list_name, entries):
-            return
-    
-    # Se entry_id non specificato, usa il primo
-    if not entry_id:
-        if DOMAIN not in hass.data or not hass.data[DOMAIN]:
-            _LOGGER.error("Nessuna entry epcube trovata")
-            return
-        entry_id = next(iter(hass.data[DOMAIN].keys()))
-    
-    if entry_id not in hass.data.get(DOMAIN, {}):
-        _LOGGER.error("Entry %s non trovata", entry_id)
-        return
-    
-    coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
-    config_entry = hass.data[DOMAIN][entry_id]["config_entry"]
-    region = config_entry.data.get("region", "EU")
-    token = config_entry.data.get("token")
-    
-    if not coordinator.data or "data" not in coordinator.data:
-        _LOGGER.error("Dati coordinator non disponibili")
-        return
-    
-    dev_id = coordinator.data["data"].get("devid")
-    if not dev_id:
-        _LOGGER.error("Device ID non trovato")
-        return
-    
-    # Se switch_to_mode è False, usa onlySave="1" per salvare senza cambiare modalità
-    only_save = "0" if switch_to_mode else "1"
+    if not tou_slots_supported(coordinator, config_entry):
+        raise ServiceValidationError(
+            "Il firmware di questo EP Cube usa i piani TOU stagionali dell'app "
+            "(firmware 4.0.8 o successivo): le fasce orarie di set_tou_schedule "
+            "non vengono usate. Configura la tariffazione dall'app EP Cube."
+        )
 
-    # allowChargingXiaGrid: preserva il valore attuale del dispositivo se non specificato
-    allow_charging_from_grid = call.data.get("allow_charging_from_grid")
-    if allow_charging_from_grid is None:
-        # Legge il valore corrente dal coordinator (getSwitchMode normalizzato in lowercase)
-        current_data = coordinator.data.get("data", {}) if coordinator.data else {}
-        allow_charging_str = str(current_data.get("allowchargingxiagrid", "1"))
-    else:
-        allow_charging_str = str(allow_charging_from_grid)
+    # Le liste non passate vengono svuotate: il servizio imposta l'intero piano
+    lists = {
+        api_key: normalize_tou_list(param, call.data.get(param, []))
+        for param, api_key in TOU_LIST_PARAMS.items()
+    }
 
-    # activeWeek deve essere array di stringhe (es. ["1","2","3","4","5"])
-    active_week_str = [str(d) for d in active_week]
-    active_week_non_workday_str = [str(d) for d in active_week_non_workday]
-    daylight_active_week_str = [str(d) for d in call.data.get("daylight_active_week", [1, 2, 3, 4, 5])]
-    daylight_active_week_non_workday_str = [str(d) for d in call.data.get("daylight_active_week_non_workday", [6, 7])]
-
-    # Prepara il payload
-    # Formato orari TOU: lista di stringhe "HH:MM_HH:MM_prezzo" (es. "08:00_12:00_0.31")
-    payload = {
-        "devId": dev_id,
-        "workStatus": "2",  # Tariffazione
-        "weatherWatch": "0",
-        "onlySave": only_save,
-        "touType": call.data.get("tou_type", 0),
-        "peakTimeList": peak_times,
-        "midPeakTimeList": mid_peak_times,
-        "offPeakTimeList": off_peak_times,
-        "peakTimeListNonWorkDay": call.data.get("peak_times_non_workday", []),
-        "midPeakTimeListNonWorkDay": call.data.get("mid_peak_times_non_workday", []),
-        "offPeakTimeListNonWorkDay": call.data.get("off_peak_times_non_workday", []),
-        "dayLightPeakTimeList": daylight_peak_times,
-        "dayLightMidPeakTimeList": daylight_mid_peak_times,
-        "dayLightOffPeakTimeList": daylight_off_peak_times,
-        "activeWeek": active_week_str,
-        "activeWeekNonWorkDay": active_week_non_workday_str,
-        "dayLightActiveWeek": daylight_active_week_str,
-        "dayLightActiveWeekNonWorkDay": daylight_active_week_non_workday_str,
+    overrides = {
+        **lists,
+        "activeWeek": [str(d) for d in call.data.get("active_week", [1, 2, 3, 4, 5])],
+        "activeWeekNonWorkDay": [str(d) for d in call.data.get("active_week_non_workday", [6, 7])],
+        "dayLightActiveWeek": [str(d) for d in call.data.get("daylight_active_week", [1, 2, 3, 4, 5])],
+        "dayLightActiveWeekNonWorkDay": [
+            str(d) for d in call.data.get("daylight_active_week_non_workday", [6, 7])
+        ],
         "dayLightSavingTime": call.data.get("daylight_saving_time", False),
-        "selfConsumptioinReserveSoc": str(call.data.get("self_consumption_reserve_soc", 5)),
-        "allowChargingXiaGrid": allow_charging_str,
     }
-    
-    _LOGGER.info("Invio configurazione TOU al dispositivo: %s", payload)
-    
-    base_url = get_base_url(region)
-    url = f"{base_url}/device/switchMode"
-    headers = {
-        "accept": "*/*",
-        "content-type": "application/json",
-        "authorization": token,
-        "user-agent": USER_AGENT,
-        "accept-language": "it-IT",
-        "accept-encoding": "gzip, deflate, br",
-    }
-    
-    timeout = aiohttp.ClientTimeout(
-        total=HTTP_TIMEOUT,
-        connect=HTTP_CONNECT_TIMEOUT
+    # Parametri facoltativi: se assenti restano i valori attuali del dispositivo.
+    # Passando alla Tariffazione a fasce l'app imposta touType "0"
+    # ("1" è la tariffa dinamica)
+    if "tou_type" in call.data:
+        overrides["touType"] = call.data["tou_type"]
+    elif call.data.get("switch_to_mode", False):
+        overrides["touType"] = "0"
+    if "self_consumption_reserve_soc" in call.data:
+        overrides["selfConsumptioinReserveSoc"] = str(call.data["self_consumption_reserve_soc"])
+    if call.data.get("allow_charging_from_grid") is not None:
+        overrides["allowChargingXiaGrid"] = str(call.data["allow_charging_from_grid"])
+
+    # switch_to_mode False: salva le fasce senza cambiare modalità (onlySave=1)
+    payload = build_switch_mode_payload(
+        data,
+        work_status="2",
+        only_save="0" if call.data.get("switch_to_mode", False) else "1",
+        current=coordinator.data.get("switch_mode"),
+        **overrides,
     )
-    
-    for attempt in range(MAX_RETRIES):
-        try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
-                    text = await resp.text()
-                    
-                    if resp.status == 200:
-                        _LOGGER.info("Configurazione TOU impostata correttamente. Risposta: %s", text)
-                        await coordinator.async_request_refresh()
-                        return
-                    elif resp.status == 401:
-                        _LOGGER.error("Token non valido o scaduto (401)")
-                        return
-                    elif resp.status == 403:
-                        _LOGGER.error("Accesso negato (403)")
-                        return
-                    elif resp.status == 429:
-                        _LOGGER.warning("Rate limit al tentativo %d/%d", attempt + 1, MAX_RETRIES)
-                        if attempt < MAX_RETRIES - 1:
-                            await asyncio.sleep(RETRY_DELAY * 2)
-                            continue
-                        else:
-                            _LOGGER.error("Rate limit persistente")
-                            return
-                    elif resp.status >= 500:
-                        _LOGGER.warning("Errore server %s al tentativo %d/%d", resp.status, attempt + 1, MAX_RETRIES)
-                        if attempt < MAX_RETRIES - 1:
-                            await asyncio.sleep(RETRY_DELAY)
-                            continue
-                        else:
-                            _LOGGER.error("Errore server persistente")
-                            return
-                    else:
-                        _LOGGER.error("Errore HTTP %s: %s", resp.status, text)
-                        return
-        except asyncio.TimeoutError:
-            _LOGGER.warning("Timeout al tentativo %d/%d", attempt + 1, MAX_RETRIES)
-            if attempt < MAX_RETRIES - 1:
-                await asyncio.sleep(RETRY_DELAY)
-                continue
-            else:
-                _LOGGER.error("Timeout persistente")
-                return
-        except aiohttp.ClientError as e:
-            _LOGGER.warning("Errore connessione al tentativo %d/%d: %s", attempt + 1, MAX_RETRIES, e)
-            if attempt < MAX_RETRIES - 1:
-                await asyncio.sleep(RETRY_DELAY)
-                continue
-            else:
-                _LOGGER.error("Errore connessione persistente")
-                return
-        except Exception as e:
-            _LOGGER.exception("Errore inaspettato: %s", e)
-            return
+
+    _LOGGER.info("Invio configurazione TOU al dispositivo: %s", payload)
+    if not await async_post_switch_mode(hass, config_entry, payload, "configurazione TOU"):
+        raise HomeAssistantError("Il server EP Cube ha rifiutato la configurazione TOU (vedi log)")
+    await coordinator.async_request_refresh()
 
 
 async def async_set_operating_mode(hass: HomeAssistant, call):
@@ -318,140 +209,95 @@ async def async_set_operating_mode(hass: HomeAssistant, call):
     - backup_power_reserve_soc: SoC riserva backup % (usato solo in modalità Backup, default 50)
     - self_consumption_reserve_soc: SoC riserva autoconsumo % (usato solo in modalità Autoconsumo, default 5)
     """
-    entry_id = call.data.get("entry_id")
     mode = str(call.data.get("mode", "1"))
-
     if mode not in ("1", "3"):
-        _LOGGER.error(
-            "Modalità non valida: '%s'. Valori accettati: '1' (Autoconsumo), '3' (Backup). "
-            "Per TOU usare il service set_tou_schedule.",
-            mode
+        raise ServiceValidationError(
+            f"Modalità non valida: '{mode}'. Valori accettati: '1' (Autoconsumo), "
+            "'3' (Backup). Per la Tariffazione usare il servizio set_tou_schedule."
         )
-        return
 
+    coordinator, config_entry = _get_entry_coordinator(hass, call.data.get("entry_id"))
+    data = coordinator.data["data"]
+
+    # Come l'app: fuori dalla tariffa dinamica touType è "0"
+    overrides = {"touType": "0"}
+    if mode == "3" and "backup_power_reserve_soc" in call.data:
+        overrides["backupPowerReserveSoc"] = str(call.data["backup_power_reserve_soc"])
+    if mode == "1" and "self_consumption_reserve_soc" in call.data:
+        overrides["selfConsumptioinReserveSoc"] = str(call.data["self_consumption_reserve_soc"])
+
+    # Payload completo: fasce TOU e l'altra riserva restano invariate (#18, #31)
+    payload = build_switch_mode_payload(
+        data, work_status=mode, current=coordinator.data.get("switch_mode"), **overrides,
+    )
+    if not await async_post_switch_mode(hass, config_entry, payload, f"modalità {mode}"):
+        raise HomeAssistantError("Il server EP Cube ha rifiutato il cambio di modalità (vedi log)")
+    await coordinator.async_request_refresh()
+
+
+def _get_entry_coordinator(hass, entry_id):
+    """Coordinator e config entry del servizio (la prima entry se non indicata)."""
+    entries = hass.data.get(DOMAIN, {})
     if not entry_id:
-        if DOMAIN not in hass.data or not hass.data[DOMAIN]:
-            _LOGGER.error("Nessuna entry epcube trovata")
-            return
-        entry_id = next(iter(hass.data[DOMAIN].keys()))
+        if not entries:
+            raise ServiceValidationError("Nessun EP Cube configurato")
+        entry_id = next(iter(entries))
+    if entry_id not in entries:
+        raise ServiceValidationError(f"EP Cube {entry_id} non trovato")
+    coordinator = entries[entry_id]["coordinator"]
+    if not coordinator.data or not coordinator.data.get("data", {}).get("devid"):
+        raise HomeAssistantError("Dati EP Cube non ancora disponibili, riprova tra poco")
+    return coordinator, entries[entry_id]["config_entry"]
 
-    if entry_id not in hass.data.get(DOMAIN, {}):
-        _LOGGER.error("Entry %s non trovata", entry_id)
-        return
 
-    coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
-    config_entry = hass.data[DOMAIN][entry_id]["config_entry"]
-    region = config_entry.data.get("region", "EU")
-    token = config_entry.data.get("token")
+# Parametri del servizio set_tou_schedule -> campi di switchMode
+TOU_LIST_PARAMS = {
+    "peak_times": "peakTimeList",
+    "mid_peak_times": "midPeakTimeList",
+    "off_peak_times": "offPeakTimeList",
+    "peak_times_non_workday": "peakTimeListNonWorkDay",
+    "mid_peak_times_non_workday": "midPeakTimeListNonWorkDay",
+    "off_peak_times_non_workday": "offPeakTimeListNonWorkDay",
+    "daylight_peak_times": "dayLightPeakTimeList",
+    "daylight_mid_peak_times": "dayLightMidPeakTimeList",
+    "daylight_off_peak_times": "dayLightOffPeakTimeList",
+}
 
-    if not coordinator.data or "data" not in coordinator.data:
-        _LOGGER.error("Dati coordinator non disponibili")
-        return
+# L'editor TOU dell'app accetta fino a 3 fasce per tipo
+MAX_TOU_SLOTS = 3
 
-    dev_id = coordinator.data["data"].get("devid")
-    if not dev_id:
-        _LOGGER.error("Device ID non trovato")
-        return
+_TOU_ENTRY = re.compile(r"^(\d{1,2}):(\d{2})_(\d{1,2}):(\d{2})(?:_(.*))?$")
 
-    # Leggi i dati correnti per preservare le impostazioni TOU
-    current_data = coordinator.data.get("data", {})
 
-    # Payload base con tutti i campi TOU preservati
-    payload = {
-        "devId": dev_id,
-        "workStatus": mode,
-        "weatherWatch": "0",
-        "onlySave": "0",
-        # Preserve TOU settings regardless of target mode
-        "touType": current_data.get("toutype", 0),
-        "peakTimeList": current_data.get("peaktimelist", []),
-        "midPeakTimeList": current_data.get("midpeaktimelist", []),
-        "offPeakTimeList": current_data.get("offpeaktimelist", []),
-        "peakTimeListNonWorkDay": current_data.get("peaktimelistnonworkday", []),
-        "midPeakTimeListNonWorkDay": current_data.get("midpeaktimelistnonworkday", []),
-        "offPeakTimeListNonWorkDay": current_data.get("offpeaktimelistnonworkday", []),
-        "dayLightPeakTimeList": current_data.get("daylightpeaktimelist", []),
-        "dayLightMidPeakTimeList": current_data.get("daylightmidpeaktimelist", []),
-        "dayLightOffPeakTimeList": current_data.get("daylightoffpeaktimelist", []),
-        # L'API EP Cube richiede array di stringhe; il coordinator può restituire interi
-        "activeWeek": [str(d) for d in current_data.get("activeweek", ["1", "2", "3", "4", "5"])],
-        "activeWeekNonWorkDay": [str(d) for d in current_data.get("activeweeknonworkday", ["6", "7"])],
-        "dayLightActiveWeek": [str(d) for d in current_data.get("daylightactiveweek", ["1", "2", "3", "4", "5"])],
-        "dayLightActiveWeekNonWorkDay": [str(d) for d in current_data.get("daylightactiveweeknonworkday", ["6", "7"])],
-        "dayLightSavingTime": current_data.get("daylightsavingtime", False),
-        "selfConsumptioinReserveSoc": str(current_data.get("selfconsumptioinreservesoc", 5)),
-        "allowChargingXiaGrid": str(current_data.get("allowchargingxiagrid", "1")),
-    }
+def normalize_tou_list(name, entries):
+    """Fasce "HH:MM_HH:MM_prezzo" nel formato dell'app.
 
-    # Aggiungi i parametri specifici per modalità
-    if mode == "3":
-        soc_value = str(call.data.get("backup_power_reserve_soc", current_data.get("backuppowerreservesoc", 50)))
-        payload["backupPowerReserveSoc"] = soc_value
-        _LOGGER.info("Attivazione modalità Backup con SoC riserva %s%%", soc_value)
-    else:  # mode == "1"
-        soc_value = str(call.data.get("self_consumption_reserve_soc", current_data.get("selfconsumptioinreservesoc", 5)))
-        payload["selfConsumptioinReserveSoc"] = soc_value
-        _LOGGER.info("Attivazione modalità Autoconsumo con SoC riserva %s%%", soc_value)
-
-    base_url = get_base_url(region)
-    url = f"{base_url}/device/switchMode"
-    headers = {
-        "accept": "*/*",
-        "content-type": "application/json",
-        "authorization": token,
-        "user-agent": USER_AGENT,
-        "accept-language": "it-IT",
-        "accept-encoding": "gzip, deflate, br",
-    }
-
-    timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT)
-
-    for attempt in range(MAX_RETRIES):
-        try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
-                    text = await resp.text()
-                    if resp.status == 200:
-                        _LOGGER.info("Modalità impostata correttamente. Risposta: %s", text)
-                        await coordinator.async_request_refresh()
-                        return
-                    elif resp.status == 401:
-                        _LOGGER.error("Token non valido o scaduto (401)")
-                        return
-                    elif resp.status == 403:
-                        _LOGGER.error("Accesso negato (403)")
-                        return
-                    elif resp.status == 429:
-                        _LOGGER.warning("Rate limit al tentativo %d/%d", attempt + 1, MAX_RETRIES)
-                        if attempt < MAX_RETRIES - 1:
-                            await asyncio.sleep(RETRY_DELAY * 2)
-                            continue
-                        _LOGGER.error("Rate limit persistente")
-                        return
-                    elif resp.status >= 500:
-                        _LOGGER.warning("Errore server %s al tentativo %d/%d", resp.status, attempt + 1, MAX_RETRIES)
-                        if attempt < MAX_RETRIES - 1:
-                            await asyncio.sleep(RETRY_DELAY)
-                            continue
-                        _LOGGER.error("Errore server persistente")
-                        return
-                    else:
-                        _LOGGER.error("Errore HTTP %s: %s", resp.status, text)
-                        return
-        except asyncio.TimeoutError:
-            _LOGGER.warning("Timeout al tentativo %d/%d", attempt + 1, MAX_RETRIES)
-            if attempt < MAX_RETRIES - 1:
-                await asyncio.sleep(RETRY_DELAY)
-                continue
-            _LOGGER.error("Timeout persistente")
-            return
-        except aiohttp.ClientError as e:
-            _LOGGER.warning("Errore connessione al tentativo %d/%d: %s", attempt + 1, MAX_RETRIES, e)
-            if attempt < MAX_RETRIES - 1:
-                await asyncio.sleep(RETRY_DELAY)
-                continue
-            _LOGGER.error("Errore connessione persistente")
-            return
-        except Exception as e:
-            _LOGGER.exception("Errore inaspettato: %s", e)
-            return
+    Come l'app: orari a due cifre, prezzo col punto decimale e senza punto
+    finale ("0,30" -> "0.30", "1." -> "1"), prezzo vuoto ammesso.
+    """
+    entries = list(entries or [])
+    if len(entries) > MAX_TOU_SLOTS:
+        raise ServiceValidationError(
+            f"{name}: al massimo {MAX_TOU_SLOTS} fasce, come nell'app EP Cube"
+        )
+    normalized = []
+    for entry in entries:
+        match = _TOU_ENTRY.match(str(entry).strip())
+        if not match:
+            raise ServiceValidationError(
+                f"Fascia TOU non valida in {name}: '{entry}'. "
+                "Formato richiesto: 'HH:MM_HH:MM_prezzo' (es. '08:00_12:00_0.31')"
+            )
+        h1, m1, h2, m2, price = match.groups()
+        if int(h1) > 24 or int(h2) > 24 or int(m1) > 59 or int(m2) > 59:
+            raise ServiceValidationError(f"Orario non valido in {name}: '{entry}'")
+        price = (price or "").strip().replace(",", ".").rstrip(".")
+        if price:
+            try:
+                float(price)
+            except ValueError as err:
+                raise ServiceValidationError(
+                    f"Prezzo non valido in {name}: '{entry}'"
+                ) from err
+        normalized.append(f"{int(h1):02d}:{m1}_{int(h2):02d}:{m2}_{price}")
+    return normalized

@@ -16,6 +16,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .const import DOMAIN
+from .api import async_save_settings
+from .extras import has_winter_mode, is_new_tou
 
 import logging
 
@@ -105,3 +107,54 @@ def async_migrate_entry_identifiers(hass: HomeAssistant, entry: ConfigEntry) -> 
 
     dev_reg.async_update_device(legacy_device.id, new_identifiers={(DOMAIN, sn)})
     _LOGGER.info("Device legacy epcube_device migrato su %s", sn)
+
+
+def setting_value(coordinator, key):
+    """Valore di un'impostazione letta da getSettingsData, None se assente."""
+    settings = (coordinator.data or {}).get("settings") or {}
+    return settings.get(key)
+
+
+async def async_save_setting(entity, setting_type, fields, label):
+    """Salva un'impostazione con saveSettings e aggiorna il coordinator."""
+    data = entity.coordinator.data.get("data", {}) if entity.coordinator.data else {}
+    dev_id = data.get("devid")
+    if not dev_id:
+        _LOGGER.error("Device ID non disponibile, impossibile salvare %s", label)
+        return False
+    if await async_save_settings(entity.hass, entity.entry, dev_id, setting_type, fields, label):
+        await entity.coordinator.async_request_refresh()
+        return True
+    return False
+
+
+def region_of(entry):
+    """Regione della entry: decide quale app (EU/US/JP) fa da riferimento."""
+    return (entry.options.get("region") or entry.data.get("region", "EU")).upper()
+
+
+_region = region_of
+
+
+def winter_mode_supported(coordinator, entry):
+    """Modalità invernale visibile come nell'app della regione (firmware del gateway).
+
+    Senza i dati di user/user/base si guarda solo se le impostazioni lo espongono.
+    """
+    data = coordinator.data or {}
+    if "winterprotect" not in (data.get("settings") or {}):
+        return False
+    device = (data.get("extras") or {}).get("user_device")
+    return has_winter_mode(device, _region(entry)) if device else True
+
+
+def tou_slots_supported(coordinator, entry):
+    """False se il sistema usa i piani TOU stagionali dell'app USA (touSettings).
+
+    Serve anche che il server restituisca davvero i piani, per non bloccare chi
+    usa ancora le fasce. L'app EU usa sempre le fasce.
+    """
+    data = coordinator.data or {}
+    device = (data.get("extras") or {}).get("user_device")
+    plans = (data.get("switch_mode") or {}).get("touSettings")
+    return not (device and is_new_tou(device, _region(entry)) and plans)

@@ -2,11 +2,36 @@
   "config": {
     "step": {
       "user": {
+        "title": "EP Cube",
+        "description": "Come vuoi accedere?",
+        "menu_options": {
+          "credentials": "Email e password (consigliato: il token si rinnova da solo)",
+          "token": "Incolla un token"
+        }
+      },
+      "credentials": {
+        "title": "Account EP Cube",
+        "description": "Usa la stessa email e password dell'app EP Cube. Home Assistant fa il login da solo (risolvendo il captcha) e rinnova il token quando scade. La password viene salvata nella configurazione di Home Assistant.",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "region": "Regione"
+        }
+      },
+      "token": {
         "data": {
           "token": "Token EPCUBE",
           "region": "Regione (deve coincidere con quella usata per generare il token)"
         },
-        "description": "Incolla il token generato per la STESSA regione che selezioni qui. Un token creato per un'altra regione viene rifiutato dal server."
+        "description": "Incolla il token generato per la STESSA regione che selezioni qui. Un token creato per un'altra regione viene rifiutato dal server. Un token incollato non si rinnova da solo."
+      },
+      "reauth_confirm": {
+        "title": "Nuovo accesso a EP Cube",
+        "description": "Il token EP Cube non è più valido. Inserisci email e password dell'app: da ora il token verrà rinnovato in automatico.",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -17,23 +42,37 @@
       "http_error": "Risposta inattesa dal server EP Cube.",
       "timeout": "Timeout nel contattare il server EP Cube.",
       "connection_error": "Impossibile raggiungere il server EP Cube. Verifica l'accesso a internet di Home Assistant.",
-      "unknown_error": "Errore sconosciuto. Controlla i log di Home Assistant per i dettagli."
+      "unknown_error": "Errore sconosciuto. Controlla i log di Home Assistant per i dettagli.",
+      "invalid_auth": "Email o password rifiutate dal server EP Cube.",
+      "captcha_failed": "Non è stato possibile risolvere il captcha del login. Riprova tra poco.",
+      "wrong_account": "Questo account non possiede l'EP Cube configurato."
     },
     "abort": {
-      "already_configured": "Questo dispositivo è già configurato."
+      "already_configured": "Questo dispositivo è già configurato.",
+      "reauth_successful": "Accesso effettuato: l'integrazione si sta ricaricando."
     }
   },
   "options": {
     "step": {
       "init": {
         "data": {
+          "username": "Email (per rinnovare il token in automatico)",
+          "password": "Password (lascia vuoto per mantenere quella attuale)",
           "token": "Token EPCUBE",
           "scan_interval": "Frequenza aggiornamento dati",
           "enable_total": "Abilita tutti i sensori totali",
           "enable_annual": "Abilita tutti i sensori annuali",
           "enable_monthly": "Abilita tutti i sensori mensili"
-        }
+        },
+        "description": "Compila email e password per far rinnovare il token in automatico all'integrazione."
       }
+    },
+    "error": {
+      "invalid_auth": "Email o password rifiutate dal server EP Cube.",
+      "captcha_failed": "Non è stato possibile risolvere il captcha del login. Riprova tra poco.",
+      "connection_error": "Impossibile raggiungere il server EP Cube. Verifica l'accesso a internet di Home Assistant.",
+      "unknown_error": "Errore sconosciuto. Controlla i log di Home Assistant per i dettagli.",
+      "missing_username": "Inserisci l'email insieme alla password."
     }
   },
   "entity": {
@@ -63,7 +102,7 @@
         "name": "Totale Energia Erogata"
       },
       "last_update": {
-        "name": "Ultimo Aggiornamento"
+        "name": "Ultimo aggiornamento"
       },
       "battery_power": {
         "name": "Potenza Batteria"
@@ -90,22 +129,22 @@
         "name": "Presenza SG"
       },
       "peaktimelist": {
-        "name": "Orari Picco"
+        "name": "Fascia costo alto (giorni lavorativi)"
       },
       "midpeaktimelist": {
-        "name": "Orari Semi-Picco"
+        "name": "Fascia costo normale (giorni lavorativi)"
       },
       "offpeaktimelist": {
-        "name": "Orari Fuori Picco"
+        "name": "Fascia costo basso (giorni lavorativi)"
       },
       "peaktimelistnonworkday": {
-        "name": "Orari Picco (Non Lavorativi)"
+        "name": "Fascia costo alto (fine settimana)"
       },
       "midpeaktimelistnonworkday": {
-        "name": "Orari Semi-Picco (Non Lavorativi)"
+        "name": "Fascia costo normale (fine settimana)"
       },
       "offpeaktimelistnonworkday": {
-        "name": "Orari Fuori Picco (Non Lavorativi)"
+        "name": "Fascia costo basso (fine settimana)"
       },
       "daylightpeaktimelist": {
         "name": "Orari Luce Picco"
@@ -153,7 +192,7 @@
         "name": "Numero Ibridi"
       },
       "dynamicpriceauth": {
-        "name": "Prezzo Dinamico"
+        "name": "Tariffa dinamica abilitata"
       },
       "softwareversion": {
         "name": "Versione Software"
@@ -255,13 +294,13 @@
         "name": "Indicatore Generatore"
       },
       "backuppower": {
-        "name": "Potenza Carichi Backup"
+        "name": "Potenza Carichi di backup"
       },
       "backupelectricity": {
-        "name": "Energia Carichi Backup Giornaliera"
+        "name": "Energia Carichi di backup Giornaliera"
       },
       "backupflowpower": {
-        "name": "Flusso Carichi Backup"
+        "name": "Flusso Carichi di backup"
       },
       "backuploadsmode": {
         "name": "Modalità Carichi Backup"
@@ -276,7 +315,7 @@
         "name": "Potenza Carico Principale"
       },
       "nonbackupelectricity": {
-        "name": "Energia Carico Principale Giornaliera"
+        "name": "Energia Carichi Non-Backup Giornaliera"
       },
       "nonbackupflowpower": {
         "name": "Flusso Carico Principale"
@@ -285,7 +324,7 @@
         "name": "Potenza EV"
       },
       "evelectricity": {
-        "name": "Energia EV"
+        "name": "Energia EV/Grandi Carichi"
       },
       "evflowpower": {
         "name": "Flusso EV"
@@ -297,7 +336,7 @@
         "name": "SoC Riserva Caricatore EV"
       },
       "selfhelprate": {
-        "name": "Tasso Autoconsumo"
+        "name": "Rapporto di contributo EP CUBE"
       },
       "selfconsumptioinreservesoc": {
         "name": "SoC Riserva Autoconsumo"
@@ -312,7 +351,7 @@
         "name": "Guasto Presente"
       },
       "systemstatus": {
-        "name": "Stato Gateway",
+        "name": "Stato di funzionamento",
         "state": {
           "self_test": "Autotest",
           "fault": "Guasto",
@@ -352,7 +391,7 @@
         "name": "Moduli Batteria"
       },
       "batterypacknum": {
-        "name": "Celle Batteria"
+        "name": "Moduli Batteria"
       },
       "faultwarningtype": {
         "name": "Tipo Avviso Guasto"
@@ -367,19 +406,19 @@
         "name": "Solo Salvataggio"
       },
       "treenum": {
-        "name": "Alberi Equivalenti Salvati"
+        "name": "Riduzione della deforestazione (alberi)"
       },
       "coal": {
-        "name": "CO2 Risparmiata"
+        "name": "Carbone risparmiato"
       },
       "earningyesterday": {
         "name": "Guadagno Ieri"
       },
       "activeweek": {
-        "name": "Giorni Attivi (Lavorativi)"
+        "name": "Giorni lavorativi"
       },
       "activeweeknonworkday": {
-        "name": "Giorni Attivi (Non Lavorativi)"
+        "name": "Fine settimana"
       },
       "daylightsavingtime": {
         "name": "Ora Legale"
@@ -397,7 +436,7 @@
         "name": "In Ora Legale"
       },
       "toutype": {
-        "name": "Tipo Tariffazione"
+        "name": "Tipo tariffazione"
       },
       "hasvalue": {
         "name": "Valore Presente"
@@ -409,7 +448,7 @@
         "name": "Tipo Connessione"
       },
       "isonline": {
-        "name": "Online"
+        "name": "Stato della comunicazione"
       },
       "heatpumpsettingspermission": {
         "name": "Permesso Pompa Calore"
@@ -661,31 +700,31 @@
         "name": "Indicatore Generatore (Mensile)"
       },
       "backuppower_total": {
-        "name": "Potenza Carichi Backup (Totale)"
+        "name": "Potenza Carichi di backup (Totale)"
       },
       "backuppower_annual": {
-        "name": "Potenza Carichi Backup (Annuale)"
+        "name": "Potenza Carichi di backup (Annuale)"
       },
       "backuppower_monthly": {
-        "name": "Potenza Carichi Backup (Mensile)"
+        "name": "Potenza Carichi di backup (Mensile)"
       },
       "backupelectricity_total": {
-        "name": "Energia Carichi Backup (Totale)"
+        "name": "Energia Carichi di backup (Totale)"
       },
       "backupelectricity_annual": {
-        "name": "Energia Carichi Backup (Annuale)"
+        "name": "Energia Carichi di backup (Annuale)"
       },
       "backupelectricity_monthly": {
-        "name": "Energia Carichi Backup (Mensile)"
+        "name": "Energia Carichi di backup (Mensile)"
       },
       "backupflowpower_total": {
-        "name": "Flusso Carichi Backup (Totale)"
+        "name": "Flusso Carichi di backup (Totale)"
       },
       "backupflowpower_annual": {
-        "name": "Flusso Carichi Backup (Annuale)"
+        "name": "Flusso Carichi di backup (Annuale)"
       },
       "backupflowpower_monthly": {
-        "name": "Flusso Carichi Backup (Mensile)"
+        "name": "Flusso Carichi di backup (Mensile)"
       },
       "backuploadsmode_total": {
         "name": "Modalità Carichi Backup (Totale)"
@@ -724,13 +763,13 @@
         "name": "Potenza Carico Principale (Mensile)"
       },
       "nonbackupelectricity_total": {
-        "name": "Energia Carico Principale (Totale)"
+        "name": "Energia Carichi Non-Backup (Totale)"
       },
       "nonbackupelectricity_annual": {
-        "name": "Energia Carico Principale (Annuale)"
+        "name": "Energia Carichi Non-Backup (Annuale)"
       },
       "nonbackupelectricity_monthly": {
-        "name": "Energia Carico Principale (Mensile)"
+        "name": "Energia Carichi Non-Backup (Mensile)"
       },
       "nonbackupflowpower_total": {
         "name": "Flusso Carico Principale (Totale)"
@@ -751,13 +790,13 @@
         "name": "Potenza EV (Mensile)"
       },
       "evelectricity_total": {
-        "name": "Energia EV (Totale)"
+        "name": "Energia EV/Grandi Carichi (Totale)"
       },
       "evelectricity_annual": {
-        "name": "Energia EV (Annuale)"
+        "name": "Energia EV/Grandi Carichi (Annuale)"
       },
       "evelectricity_monthly": {
-        "name": "Energia EV (Mensile)"
+        "name": "Energia EV/Grandi Carichi (Mensile)"
       },
       "evflowpower_total": {
         "name": "Flusso EV (Totale)"
@@ -787,13 +826,13 @@
         "name": "SoC Riserva Caricatore EV (Mensile)"
       },
       "selfhelprate_total": {
-        "name": "Tasso Autoconsumo (Totale)"
+        "name": "Rapporto di contributo EP CUBE (Totale)"
       },
       "selfhelprate_annual": {
-        "name": "Tasso Autoconsumo (Annuale)"
+        "name": "Rapporto di contributo EP CUBE (Annuale)"
       },
       "selfhelprate_monthly": {
-        "name": "Tasso Autoconsumo (Mensile)"
+        "name": "Rapporto di contributo EP CUBE (Mensile)"
       },
       "selfconsumptioinreservesoc_total": {
         "name": "SoC Riserva Autoconsumo (Totale)"
@@ -922,13 +961,13 @@
         "name": "Moduli Batteria (Mensile)"
       },
       "batterypacknum_total": {
-        "name": "Celle Batteria (Totale)"
+        "name": "Moduli Batteria (Totale)"
       },
       "batterypacknum_annual": {
-        "name": "Celle Batteria (Annuale)"
+        "name": "Moduli Batteria (Annuale)"
       },
       "batterypacknum_monthly": {
-        "name": "Celle Batteria (Mensile)"
+        "name": "Moduli Batteria (Mensile)"
       },
       "faultwarningtype_total": {
         "name": "Tipo Avviso Guasto (Totale)"
@@ -967,22 +1006,22 @@
         "name": "Solo Salvataggio (Mensile)"
       },
       "treenum_total": {
-        "name": "Alberi Equivalenti Salvati (Totale)"
+        "name": "Riduzione della deforestazione (alberi) (Totale)"
       },
       "treenum_annual": {
-        "name": "Alberi Equivalenti Salvati (Annuale)"
+        "name": "Riduzione della deforestazione (alberi) (Annuale)"
       },
       "treenum_monthly": {
-        "name": "Alberi Equivalenti Salvati (Mensile)"
+        "name": "Riduzione della deforestazione (alberi) (Mensile)"
       },
       "coal_total": {
-        "name": "CO2 Risparmiata (Totale)"
+        "name": "Carbone risparmiato (Totale)"
       },
       "coal_annual": {
-        "name": "CO2 Risparmiata (Annuale)"
+        "name": "Carbone risparmiato (Annuale)"
       },
       "coal_monthly": {
-        "name": "CO2 Risparmiata (Mensile)"
+        "name": "Carbone risparmiato (Mensile)"
       },
       "earningyesterday_total": {
         "name": "Guadagno Ieri (Totale)"
@@ -1172,6 +1211,302 @@
       },
       "devtype_monthly": {
         "name": "Tipo Dispositivo (Mensile)"
+      },
+      "last_power_cut": {
+        "name": "Ultima interruzione"
+      },
+      "earning_today": {
+        "name": "Guadagno oggi"
+      },
+      "earning_month": {
+        "name": "Guadagno del mese"
+      },
+      "weather": {
+        "name": "Meteo"
+      },
+      "batterypower": {
+        "name": "Potenza Batteria (API)"
+      },
+      "dailyelectricitysales": {
+        "name": "Vendite Elettricità Giornaliere"
+      },
+      "hasev": {
+        "name": "EV/Grandi Carichi Presente"
+      },
+      "hasgenerator": {
+        "name": "Generatore Esterno Presente"
+      },
+      "smarthomeelectricity": {
+        "name": "Energia Smart Home"
+      },
+      "smarthomepower": {
+        "name": "Potenza Smart Home"
+      },
+      "timeleft": {
+        "name": "Tempo rimanente (off-grid)"
+      },
+      "vppcode": {
+        "name": "Programma VPP"
+      },
+      "backupaftermode": {
+        "name": "Modalità Dopo il Backup"
+      },
+      "backupdurationhour": {
+        "name": "Durata Backup (Ore)"
+      },
+      "backupdurationminute": {
+        "name": "Durata Backup (Minuti)"
+      },
+      "backupendtime": {
+        "name": "Fine Backup"
+      },
+      "exporteverything": {
+        "name": "Esporta Tutto"
+      },
+      "ja122025enabled": {
+        "name": "Modalità JA12 (Title 24)"
+      },
+      "ja122025enabledsoc": {
+        "name": "SoC Riserva JA12"
+      },
+      "ja12effectivedate": {
+        "name": "Data Attivazione JA12"
+      },
+      "newapptou": {
+        "name": "Formato TOU Nuova App"
+      },
+      "sellingenable": {
+        "name": "Esportazione Solare DC"
+      },
+      "smarthomeelectricity_total": {
+        "name": "Energia Smart Home (Totale)"
+      },
+      "smarthomeelectricity_annual": {
+        "name": "Energia Smart Home (Annuale)"
+      },
+      "smarthomeelectricity_monthly": {
+        "name": "Energia Smart Home (Mensile)"
+      },
+      "gridstandard": {
+        "name": "Normativa di Rete (codice)"
+      },
+      "lpptimeduration": {
+        "name": "Durata LPP"
+      },
+      "lpctimeduration": {
+        "name": "Durata LPC"
+      },
+      "wintermode": {
+        "name": "Winter Mode"
+      },
+      "winterprotect": {
+        "name": "Protezione Invernale"
+      },
+      "charginglimitsoc": {
+        "name": "SoC Limite Ricarica"
+      },
+      "hasevse": {
+        "name": "Caricatore EV (EVSE) Presente"
+      },
+      "evseonline": {
+        "name": "Caricatore EV (EVSE) Online"
+      },
+      "dynamicpricetips": {
+        "name": "Info tariffa dinamica"
+      },
+      "pv_string_power": {
+        "name": "Potenza Stringa PV{number}"
+      },
+      "total_load_power": {
+        "name": "Potenza consumo totale"
+      },
+      "total_load_energy": {
+        "name": "Energia consumo totale (oggi)"
+      },
+      "tou_peak_times": {
+        "name": "Fascia costo alto"
+      },
+      "tou_midpeak_times": {
+        "name": "Fascia costo normale"
+      },
+      "tou_offpeak_times": {
+        "name": "Fascia costo basso"
+      },
+      "tou_daylight_peak_times": {
+        "name": "Fascia costo alto (ora legale)"
+      },
+      "tou_daylight_midpeak_times": {
+        "name": "Fascia costo normale (ora legale)"
+      },
+      "tou_daylight_offpeak_times": {
+        "name": "Fascia costo basso (ora legale)"
+      },
+      "tou_active_week": {
+        "name": "Giorni lavorativi TOU"
+      },
+      "tou_active_week_nonworkday": {
+        "name": "Fine settimana TOU"
+      },
+      "last_warning": {
+        "name": "Ultimo avviso"
+      },
+      "last_fault": {
+        "name": "Ultimo guasto"
+      },
+      "wifi": {
+        "name": "Wi-Fi"
+      },
+      "firmware": {
+        "name": "Firmware"
+      },
+      "id": {
+        "name": "ID Record Cloud"
+      },
+      "filters": {
+        "name": "Filtri VPP"
+      },
+      "toucurrenttimes": {
+        "name": "Fasce TOU Correnti"
+      },
+      "tousettings": {
+        "name": "Impostazioni TOU (nuova app)"
+      },
+      "dynamicchargeprice": {
+        "name": "Prezzo target tariffa dinamica"
+      },
+      "dynamicdischargeprice": {
+        "name": "Prezzo target di vendita"
+      },
+      "dynamicpricebinding": {
+        "name": "Area prezzi tariffa dinamica"
+      },
+      "intelligentmodechargingsoc": {
+        "name": "SoC carica modalità intelligente"
+      },
+      "intelligentmodedischargesoc": {
+        "name": "SoC scarica modalità intelligente"
+      },
+      "sellingmodedischargesoc": {
+        "name": "SoC scarica modalità vendita"
+      },
+      "quickchargestatus": {
+        "name": "Stato ricarica rapida"
+      },
+      "lowelectricitypricetime": {
+        "name": "Orario prezzo basso"
+      },
+      "evseworkstatus": {
+        "name": "Stato caricatore EV (EVSE)"
+      },
+      "chargingpowerfromgridlimit": {
+        "name": "Limite potenza ricarica da rete"
+      },
+      "drycontactinputdevicetype": {
+        "name": "Tipo dispositivo contatto pulito"
+      },
+      "dynamicprice": {
+        "name": "Prezzo attuale tariffa dinamica"
+      },
+      "eebuspromptmsg": {
+        "name": "Messaggio EEBUS"
+      },
+      "enwgeegenable": {
+        "name": "EnWG/EEG abilitato"
+      },
+      "heatpumpsettingstip": {
+        "name": "Info pompa di calore"
+      },
+      "heatpumpworkmode": {
+        "name": "Modalità pompa di calore"
+      },
+      "homeconnectdevices": {
+        "name": "Dispositivi Home Connect"
+      },
+      "pvtopowertogridlimits": {
+        "name": "Limite immissione FV in rete"
+      }
+    },
+    "binary_sensor": {
+      "off_grid": {
+        "name": "Off-grid (blackout)"
+      },
+      "grid_present": {
+        "name": "Rete"
+      },
+      "winter_mode_active": {
+        "name": "Modalità invernale attiva"
+      }
+    },
+    "switch": {
+      "winter_mode": {
+        "name": "Modalità invernale"
+      },
+      "weather_watch": {
+        "name": "Vigilanza meteo"
+      },
+      "allow_charging_from_grid": {
+        "name": "Consentire la ricarica tramite rete"
+      },
+      "off_grid_notification": {
+        "name": "Notifica off-grid"
+      },
+      "indicator_light": {
+        "name": "Luce indicatore"
+      },
+      "auto_update_firmware": {
+        "name": "Aggiornamento remoto del firmware"
+      }
+    },
+    "number": {
+      "winter_mode_soc": {
+        "name": "SoC obiettivo modalità invernale"
+      },
+      "dynamic_reserve_soc": {
+        "name": "SOC dinamico"
+      },
+      "self_consumption_reserve_soc": {
+        "name": "Riserva SOC autoconsumo"
+      },
+      "backup_reserve_soc": {
+        "name": "Riserva SOC back-up"
+      },
+      "tou_peak_start": {
+        "name": "Fascia costo alto inizio (HH:00)"
+      },
+      "tou_peak_end": {
+        "name": "Fascia costo alto fine (HH:00)"
+      },
+      "tou_midpeak_start": {
+        "name": "Fascia costo normale inizio (HH:00)"
+      },
+      "tou_midpeak_end": {
+        "name": "Fascia costo normale fine (HH:00)"
+      },
+      "tou_offpeak_start": {
+        "name": "Fascia costo basso inizio (HH:00)"
+      },
+      "tou_offpeak_end": {
+        "name": "Fascia costo basso fine (HH:00)"
+      },
+      "sleep_mode_soc": {
+        "name": "SoC sleep mode"
+      },
+      "off_grid_notification_soc": {
+        "name": "SoC notifica off-grid"
+      },
+      "ev_charger_reserve_soc": {
+        "name": "SoC riserva EV/grandi carichi"
+      },
+      "dynamic_charge_price": {
+        "name": "Prezzo target"
+      },
+      "dynamic_discharge_price": {
+        "name": "Prezzo target di vendita"
+      }
+    },
+    "select": {
+      "operating_mode": {
+        "name": "Modalità"
       }
     }
   }

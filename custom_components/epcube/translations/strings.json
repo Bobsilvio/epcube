@@ -2,11 +2,36 @@
   "config": {
     "step": {
       "user": {
+        "title": "EP Cube",
+        "description": "How do you want to sign in?",
+        "menu_options": {
+          "credentials": "Email and password (recommended: the token renews automatically)",
+          "token": "Paste a token"
+        }
+      },
+      "credentials": {
+        "title": "EP Cube account",
+        "description": "Use the same email and password as the EP Cube app. Home Assistant signs in on its own (solving the login captcha) and renews the token when it expires. The password is stored in Home Assistant's configuration.",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "region": "Region"
+        }
+      },
+      "token": {
         "data": {
           "token": "EPCUBE Token",
           "region": "Region (must match the one used to generate the token)"
         },
-        "description": "Paste the token generated for the SAME region you select here. A token created for another region is rejected by the server."
+        "description": "Paste the token generated for the SAME region you select here. A token created for another region is rejected by the server. A pasted token is not renewed automatically."
+      },
+      "reauth_confirm": {
+        "title": "Sign in to EP Cube again",
+        "description": "The EP Cube token is no longer valid. Enter the app's email and password: from now on the token will be renewed automatically.",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -17,24 +42,38 @@
       "http_error": "Unexpected response from the EP Cube server.",
       "timeout": "Timeout contacting the EP Cube server.",
       "connection_error": "Cannot reach the EP Cube server. Check Home Assistant's internet access.",
-      "unknown_error": "Unknown error. Check the Home Assistant logs for details."
+      "unknown_error": "Unknown error. Check the Home Assistant logs for details.",
+      "invalid_auth": "Email or password rejected by the EP Cube server.",
+      "captcha_failed": "The login captcha could not be solved. Try again in a moment.",
+      "wrong_account": "This account does not own the configured EP Cube."
     },
     "abort": {
-      "already_configured": "This device is already configured."
+      "already_configured": "This device is already configured.",
+      "reauth_successful": "Signed in again: the integration is reloading."
     }
   },
   "options": {
     "step": {
       "init": {
         "data": {
+          "username": "Email (to renew the token automatically)",
+          "password": "Password (leave empty to keep the current one)",
           "token": "EPCUBE Token",
           "scan_interval": "Data update frequency",
           "scale_power": "Multiply power values (*1000)",
           "enable_total": "Enable all total sensors",
           "enable_annual": "Enable all annual sensors",
           "enable_monthly": "Enable all monthly sensors"
-        }
+        },
+        "description": "Fill in email and password to let the integration renew the token on its own."
       }
+    },
+    "error": {
+      "invalid_auth": "Email or password rejected by the EP Cube server.",
+      "captcha_failed": "The login captcha could not be solved. Try again in a moment.",
+      "connection_error": "Cannot reach the EP Cube server. Check Home Assistant's internet access.",
+      "unknown_error": "Unknown error. Check the Home Assistant logs for details.",
+      "missing_username": "Enter the email together with the password."
     }
   },
   "entity": {
@@ -157,7 +196,7 @@
         "name": "EV Power"
       },
       "evelectricity": {
-        "name": "EV Energy"
+        "name": "EV/Large Appliance Energy"
       },
       "nonbackuppower": {
         "name": "Non Backup Power"
@@ -333,6 +372,308 @@
       },
       "solardcpower": {
         "name": "Solar DC Power"
+      },
+      "last_power_cut": {
+        "name": "Last power cut"
+      },
+      "earning_today": {
+        "name": "Revenue today"
+      },
+      "earning_month": {
+        "name": "Revenue this month"
+      },
+      "weather": {
+        "name": "Weather"
+      },
+      "batterypower": {
+        "name": "Battery Power (API)"
+      },
+      "dailyelectricitysales": {
+        "name": "Daily Electricity Sales"
+      },
+      "hasev": {
+        "name": "EV/Large Appliance Installed"
+      },
+      "hasgenerator": {
+        "name": "External Generator Installed"
+      },
+      "smarthomeelectricity": {
+        "name": "Smart Home Energy"
+      },
+      "smarthomepower": {
+        "name": "Smart Home Power"
+      },
+      "timeleft": {
+        "name": "Time Left (off-grid)"
+      },
+      "vppcode": {
+        "name": "VPP Program"
+      },
+      "backupaftermode": {
+        "name": "Mode After Backup"
+      },
+      "backupdurationhour": {
+        "name": "Backup Duration (Hours)"
+      },
+      "backupdurationminute": {
+        "name": "Backup Duration (Minutes)"
+      },
+      "backupendtime": {
+        "name": "Backup End Time"
+      },
+      "exporteverything": {
+        "name": "Export Everything"
+      },
+      "ja122025enabled": {
+        "name": "JA12 (Title 24) Mode"
+      },
+      "ja122025enabledsoc": {
+        "name": "JA12 Backup Reserve SoC"
+      },
+      "ja12effectivedate": {
+        "name": "JA12 Effective Date"
+      },
+      "newapptou": {
+        "name": "New App TOU Format"
+      },
+      "sellingenable": {
+        "name": "DC Solar Export"
+      },
+      "smarthomeelectricity_total": {
+        "name": "Smart Home Energy (Total)"
+      },
+      "smarthomeelectricity_annual": {
+        "name": "Smart Home Energy (Annual)"
+      },
+      "smarthomeelectricity_monthly": {
+        "name": "Smart Home Energy (Monthly)"
+      },
+      "gridstandard": {
+        "name": "Grid Standard (code)"
+      },
+      "lpptimeduration": {
+        "name": "LPP Time Duration"
+      },
+      "lpctimeduration": {
+        "name": "LPC Time Duration"
+      },
+      "wintermode": {
+        "name": "Winter Mode"
+      },
+      "winterprotect": {
+        "name": "Winter Protection"
+      },
+      "charginglimitsoc": {
+        "name": "Charging Limit SoC"
+      },
+      "hasevse": {
+        "name": "EV Charger (EVSE) Installed"
+      },
+      "evseonline": {
+        "name": "EV Charger (EVSE) Online"
+      },
+      "dynamicpricetips": {
+        "name": "Dynamic Pricing Info"
+      },
+      "pv_string_power": {
+        "name": "PV{number} String Power"
+      },
+      "last_update": {
+        "name": "Last update"
+      },
+      "total_load_power": {
+        "name": "Total load power"
+      },
+      "total_load_energy": {
+        "name": "Total load energy (today)"
+      },
+      "tou_peak_times": {
+        "name": "TOU peak times"
+      },
+      "tou_midpeak_times": {
+        "name": "TOU mid-peak times"
+      },
+      "tou_offpeak_times": {
+        "name": "TOU off-peak times"
+      },
+      "tou_daylight_peak_times": {
+        "name": "TOU daylight saving peak times"
+      },
+      "tou_daylight_midpeak_times": {
+        "name": "TOU daylight saving mid-peak times"
+      },
+      "tou_daylight_offpeak_times": {
+        "name": "TOU daylight saving off-peak times"
+      },
+      "tou_active_week": {
+        "name": "TOU active days (workdays)"
+      },
+      "tou_active_week_nonworkday": {
+        "name": "TOU active days (non-workdays)"
+      },
+      "last_warning": {
+        "name": "Last warning"
+      },
+      "last_fault": {
+        "name": "Last fault"
+      },
+      "wifi": {
+        "name": "Wi-Fi"
+      },
+      "firmware": {
+        "name": "Firmware"
+      },
+      "id": {
+        "name": "Cloud Record ID"
+      },
+      "filters": {
+        "name": "VPP Filters"
+      },
+      "toucurrenttimes": {
+        "name": "TOU Current Times"
+      },
+      "tousettings": {
+        "name": "TOU Settings (new app)"
+      },
+      "dynamicchargeprice": {
+        "name": "Dynamic Tariff Target Price"
+      },
+      "dynamicdischargeprice": {
+        "name": "Dynamic Tariff Target Sell Price"
+      },
+      "dynamicpricebinding": {
+        "name": "Dynamic Tariff Price Region"
+      },
+      "intelligentmodechargingsoc": {
+        "name": "Smart Mode Charging SoC"
+      },
+      "intelligentmodedischargesoc": {
+        "name": "Smart Mode Discharge SoC"
+      },
+      "sellingmodedischargesoc": {
+        "name": "Selling Mode Discharge SoC"
+      },
+      "quickchargestatus": {
+        "name": "Quick Charge Status"
+      },
+      "lowelectricitypricetime": {
+        "name": "Low Price Time"
+      },
+      "evseworkstatus": {
+        "name": "EV Charger (EVSE) Status"
+      },
+      "toutype": {
+        "name": "TOU Type"
+      },
+      "chargingpowerfromgridlimit": {
+        "name": "Grid Charging Power Limit"
+      },
+      "drycontactinputdevicetype": {
+        "name": "Dry Contact Input Device Type"
+      },
+      "dynamicprice": {
+        "name": "Dynamic Tariff Current Price"
+      },
+      "eebuspromptmsg": {
+        "name": "EEBUS Message"
+      },
+      "enwgeegenable": {
+        "name": "EnWG/EEG Enabled"
+      },
+      "heatpumpsettingstip": {
+        "name": "Heat Pump Info"
+      },
+      "heatpumpworkmode": {
+        "name": "Heat Pump Mode"
+      },
+      "homeconnectdevices": {
+        "name": "Home Connect Devices"
+      },
+      "pvtopowertogridlimits": {
+        "name": "PV Grid Export Limit"
+      }
+    },
+    "binary_sensor": {
+      "off_grid": {
+        "name": "Off-grid (grid outage)"
+      },
+      "grid_present": {
+        "name": "Grid"
+      },
+      "winter_mode_active": {
+        "name": "Winter mode active"
+      }
+    },
+    "switch": {
+      "winter_mode": {
+        "name": "Winter mode"
+      },
+      "weather_watch": {
+        "name": "Weather watch"
+      },
+      "allow_charging_from_grid": {
+        "name": "Allow charging via grid"
+      },
+      "off_grid_notification": {
+        "name": "Off-grid notification"
+      },
+      "indicator_light": {
+        "name": "Indicator light"
+      },
+      "auto_update_firmware": {
+        "name": "Remote firmware update"
+      }
+    },
+    "number": {
+      "winter_mode_soc": {
+        "name": "Winter mode target SoC"
+      },
+      "dynamic_reserve_soc": {
+        "name": "Reserve SoC (active mode)"
+      },
+      "self_consumption_reserve_soc": {
+        "name": "Self-consumption reserve SoC"
+      },
+      "backup_reserve_soc": {
+        "name": "Backup reserve SoC"
+      },
+      "tou_peak_start": {
+        "name": "TOU peak start (HH:00)"
+      },
+      "tou_peak_end": {
+        "name": "TOU peak end (HH:00)"
+      },
+      "tou_midpeak_start": {
+        "name": "TOU mid-peak start (HH:00)"
+      },
+      "tou_midpeak_end": {
+        "name": "TOU mid-peak end (HH:00)"
+      },
+      "tou_offpeak_start": {
+        "name": "TOU off-peak start (HH:00)"
+      },
+      "tou_offpeak_end": {
+        "name": "TOU off-peak end (HH:00)"
+      },
+      "sleep_mode_soc": {
+        "name": "Sleep mode SoC"
+      },
+      "off_grid_notification_soc": {
+        "name": "Off-grid notification SoC"
+      },
+      "ev_charger_reserve_soc": {
+        "name": "EV/Large appliance reserve SoC"
+      },
+      "dynamic_charge_price": {
+        "name": "Dynamic tariff target price"
+      },
+      "dynamic_discharge_price": {
+        "name": "Dynamic tariff target sell price"
+      }
+    },
+    "select": {
+      "operating_mode": {
+        "name": "Operating mode"
       }
     }
   }

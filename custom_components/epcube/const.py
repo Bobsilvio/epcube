@@ -1,8 +1,12 @@
 DOMAIN = "epcube"
 DEFAULT_SCAN_INTERVAL = 5
-PLATFORMS = ["sensor", "select", "number", "switch"]
+PLATFORMS = ["sensor", "binary_sensor", "select", "number", "switch"]
 
 CONF_SCALE_POWER = "scale_power"
+
+# Credenziali dell'app EP Cube, usate per rinnovare il token in automatico
+CONF_USERNAME = "username"
+CONF_PASSWORD = "password"
 
 CONF_ENABLE_TOTAL = "enable_total"
 CONF_ENABLE_ANNUAL = "enable_annual"
