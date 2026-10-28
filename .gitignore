@@ -2,3 +2,9 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# strumenti locali di prova (token, log)
+tools/ha_token.txt
+tools/*.log
+tools/*.jsonl
+tools/epcube_sim_state.json

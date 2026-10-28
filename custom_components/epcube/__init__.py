@@ -1,5 +1,5 @@
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError, ServiceValidationError
 from .const import (
     DOMAIN, PLATFORMS, DEFAULT_SCAN_INTERVAL, get_base_url, USER_AGENT,
@@ -11,6 +11,7 @@ from .api import async_post_switch_mode, entry_token
 from .payload import build_switch_mode_payload
 from .entity import tou_slots_supported
 from .auth import async_refresh_token, has_credentials, InvalidCredentials
+from .wallbox import async_check_wallbox_support
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from datetime import timedelta, datetime
@@ -21,6 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SERVICE_SET_TOU_SCHEDULE = "set_tou_schedule"
 SERVICE_SET_OPERATING_MODE = "set_operating_mode"
+SERVICE_CHECK_WALLBOX_SUPPORT = "check_wallbox_support"
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if DOMAIN not in hass.data:
@@ -109,7 +111,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         handle_set_operating_mode
     )
 
+    # Verifica se il firmware del gateway implementa davvero la funzione wallbox
+    async def handle_check_wallbox_support(call) -> ServiceResponse:
+        return await async_check_wallbox(hass, call)
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CHECK_WALLBOX_SUPPORT,
+        handle_check_wallbox_support,
+        supports_response=SupportsResponse.ONLY,
+    )
+
     return True
+
+
+async def async_check_wallbox(hass: HomeAssistant, call) -> ServiceResponse:
+    """Scrive un registro della wallbox e lo rilegge, per vedere se resta."""
+    coordinator, entry = _get_entry_coordinator(hass, call.data.get("entry_id"))
+    dev_id = coordinator.data["data"]["devid"]
+    region = entry.options.get("region") or entry.data.get("region", "EU")
+    return await async_check_wallbox_support(
+        async_get_clientsession(hass),
+        entry_token(entry),
+        region,
+        str(dev_id),
+        solo_lettura=call.data.get("read_only", False),
+    )
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

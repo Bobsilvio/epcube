@@ -125,7 +125,7 @@ async def async_fetch_slow_extras(session, token, region, dev_id, sg_sn, state):
 
     now = datetime.now()
     (power_cuts, earning_day, earning_month, weather,
-     warnings, faults, network, firmware, user_device) = await asyncio.gather(
+     warnings, faults, network, firmware, user_device, upgrade) = await asyncio.gather(
         async_fetch_api_data(
             session, token, region,
             f"/device/getDevPowerCutLog?devId={dev_id}&pageNo=1&pageSize={POWER_CUT_LOG_SIZE}",
@@ -153,6 +153,12 @@ async def async_fetch_slow_extras(session, token, region, dev_id, sg_sn, state):
         async_fetch_api_data(session, token, region, f"/device/netWorkInfo?devId={dev_id}"),
         async_fetch_api_data(session, token, region, f"/user/user/queryFirmwareInfo?devId={dev_id}"),
         async_fetch_user_device(session, token, region),
+        # Firmware disponibile (canale installatore): newSoftWareVersion sul gateway.
+        # Solo lettura; usato dall'entità update per segnalare un aggiornamento.
+        async_fetch_api_data(
+            session, token, region,
+            f"/device/checkUpgrade?devId={dev_id}&type=2&forcedUpgrade=0",
+        ),
     )
 
     extras = {
@@ -165,6 +171,7 @@ async def async_fetch_slow_extras(session, token, region, dev_id, sg_sn, state):
         "network": network if isinstance(network, dict) else None,
         "firmware": firmware if isinstance(firmware, dict) else None,
         "user_device": user_device,
+        "upgrade": upgrade if isinstance(upgrade, dict) else None,
     }
     # Un endpoint che fallisce mantiene l'ultimo valore buono
     if state.extras:

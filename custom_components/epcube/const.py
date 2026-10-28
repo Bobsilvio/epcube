@@ -1,6 +1,6 @@
 DOMAIN = "epcube"
 DEFAULT_SCAN_INTERVAL = 5
-PLATFORMS = ["sensor", "binary_sensor", "select", "number", "switch"]
+PLATFORMS = ["sensor", "binary_sensor", "select", "number", "switch", "update"]
 
 CONF_SCALE_POWER = "scale_power"
 
@@ -25,6 +25,12 @@ STATS_TIMEOUT = 12  # seconds
 # istanti leggermente diversi: a batteria ferma resta un residuo di qualche
 # decina di watt. Sotto questa soglia il valore viene riportato a 0 (issue #20)
 BATTERY_POWER_DEADBAND_KW = 0.1
+
+# Isteresi dello stato batteria (charging/discharging/idle): si entra in
+# carica/scarica oltre ±BATTERY_POWER_DEADBAND_KW e si torna a "ferma" solo
+# sotto BATTERY_STATUS_IDLE_KW. Nella fascia intermedia si tiene lo stato
+# precedente, così non oscilla quando la potenza resta vicino alla soglia.
+BATTERY_STATUS_IDLE_KW = 0.05
 
 # Retry Configuration
 MAX_RETRIES = 3

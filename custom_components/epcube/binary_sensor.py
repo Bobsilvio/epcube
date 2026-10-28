@@ -7,6 +7,7 @@ mostra la schermata Home.
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass, BinarySensorEntity, BinarySensorEntityDescription,
 )
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .entity import bind_entities_to_entry
 from .const import DOMAIN
@@ -34,6 +35,7 @@ BINARY_SENSORS = (
         icon="mdi:transmission-tower-off",
         field="status",
         on_values=("0",),
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     # gridLight 1: icona della rete accesa nel flusso di potenza
     EpCubeBinarySensorDescription(
@@ -51,6 +53,7 @@ BINARY_SENSORS = (
         icon="mdi:snowflake",
         field="systemspecialworkmode",
         on_values=("6",),
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )
 

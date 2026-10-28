@@ -198,3 +198,33 @@ set_operating_mode:
           min: 0
           max: 100
           unit_of_measurement: "%"
+
+check_wallbox_support:
+  name: Verifica supporto wallbox
+  description: >
+    Controlla se il firmware del gateway implementa davvero la funzione wallbox.
+    Il cloud risponde "Success" anche quando la funzione non c'è: il servizio
+    scrive un registro, lo rilegge dopo qualche secondo e dice se è rimasto.
+    Legge anche il livello di carica della batteria come controprova.
+    Mostra inoltre la versione del firmware installata e quella eventualmente
+    disponibile, confrontando il canale dell'installatore con quello che l'app
+    mostra all'utente: possono non coincidere.
+    Nota: il servizio non aggiorna nulla e non avvia nessun aggiornamento.
+    Se decidi di aggiornare il firmware, fallo dall'app con il gateway in rete
+    e alimentato per tutto il processo, senza interromperlo: un aggiornamento
+    interrotto può lasciare l'inverter in uno stato difficile da recuperare.
+  fields:
+    entry_id:
+      name: ID Entry
+      description: ID della configurazione epcube (opzionale, usa la prima se non specificato)
+      example: "abc12345"
+      required: false
+    read_only:
+      name: Sola lettura
+      description: >
+        Non scrive nulla: mostra solo lo stato attuale dei registri.
+        Senza scrittura però non si può dare un verdetto.
+      required: false
+      default: false
+      selector:
+        boolean:

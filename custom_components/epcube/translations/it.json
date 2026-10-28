@@ -107,6 +107,14 @@
       "battery_power": {
         "name": "Potenza Batteria"
       },
+      "battery_status": {
+        "name": "Stato Batteria",
+        "state": {
+          "charging": "In carica",
+          "discharging": "In scarica",
+          "idle": "Ferma"
+        }
+      },
       "gridpowera": {
         "name": "Potenza Rete Fase A"
       },
@@ -382,13 +390,13 @@
         "name": "Dispositivo Nuovo"
       },
       "version": {
-        "name": "Firmware"
+        "name": "Codice versione (build)"
       },
       "payloadversion": {
         "name": "Versione Payload"
       },
       "ressnumber": {
-        "name": "Moduli Batteria"
+        "name": "Numero RESS"
       },
       "batterypacknum": {
         "name": "Moduli Batteria"
@@ -554,6 +562,24 @@
       },
       "gridelectricity_monthly": {
         "name": "Energia Rete (Mensile)"
+      },
+      "batterychargeelectricity_total": {
+        "name": "Carica Batteria (Totale)"
+      },
+      "batterychargeelectricity_annual": {
+        "name": "Carica Batteria (Annuale)"
+      },
+      "batterychargeelectricity_monthly": {
+        "name": "Carica Batteria (Mensile)"
+      },
+      "batterydischargeelectricity_total": {
+        "name": "Scarica Batteria (Totale)"
+      },
+      "batterydischargeelectricity_annual": {
+        "name": "Scarica Batteria (Annuale)"
+      },
+      "batterydischargeelectricity_monthly": {
+        "name": "Scarica Batteria (Mensile)"
       },
       "gridelectricityfrom_total": {
         "name": "Energia Prelevata da Rete (Totale)"
@@ -1297,7 +1323,7 @@
         "name": "Durata LPC"
       },
       "wintermode": {
-        "name": "Winter Mode"
+        "name": "Modalità invernale (codice)"
       },
       "winterprotect": {
         "name": "Protezione Invernale"
@@ -1424,6 +1450,21 @@
       },
       "pvtopowertogridlimits": {
         "name": "Limite immissione FV in rete"
+      },
+      "pv_string_current": {
+        "name": "Corrente Stringa PV{number}"
+      },
+      "pv_string_voltage": {
+        "name": "Tensione Stringa PV{number}"
+      },
+      "kebaauthority": {
+        "name": "Autorizzazione Caricatore EV (KEBA)"
+      },
+      "eebusauthority": {
+        "name": "Autorizzazione EEBus"
+      },
+      "triphaseauthority": {
+        "name": "Autorizzazione Trifase"
       }
     },
     "binary_sensor": {
@@ -1507,6 +1548,11 @@
     "select": {
       "operating_mode": {
         "name": "Modalità"
+      }
+    },
+    "update": {
+      "firmware": {
+        "name": "Aggiornamento firmware"
       }
     }
   }

@@ -1,0 +1,334 @@
+# EP Cube in locale via Bluetooth (sola lettura) — ESPHome
+#
+# Legge i registri Modbus del gateway EP Cube via BLE, con lo stesso protocollo
+# dell'app ufficiale: JSON {"RawModbus": "<frame RTU hex>"} scritto sulla
+# caratteristica ee6d7171-..., risposta in notifica su ee6d7172-...
+# Frame: slave 0x64, funzione 03 (lettura), registro, quantità, CRC16.
+#
+# Sensori pubblicati: solo registri verificati confrontandoli col cloud EP Cube.
+# Nessuna scrittura sul gateway.
+
+substitutions:
+  epcube_mac: "80:64:6F:DD:33:B6"   # gateway EPCUBE-0324208235
+  poll_interval: 30s
+
+esphome:
+  name: epcube-ble
+  friendly_name: EP Cube BLE
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+  # Solo le righe riassuntive "epcube": niente annuncio di ogni singolo valore
+  logs:
+    sensor: WARN
+    binary_sensor: WARN
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+ota:
+  - platform: esphome
+
+esp32_ble:
+  io_capability: none
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+
+ble_client:
+  - mac_address: ${epcube_mac}
+    id: epcube
+
+globals:
+  # Ultima potenza di rete letta (serve al bilancio della batteria)
+  - id: grid_w
+    type: float
+    initial_value: "NAN"
+  # Primo registro dell'ultima richiesta: la risposta Modbus non lo contiene
+  - id: pending_start
+    type: int
+    initial_value: "0"
+
+script:
+  # Chiede "count" registri a partire da "start"
+  - id: read_block
+    parameters:
+      start: int
+      count: int
+    then:
+      - lambda: id(pending_start) = start;
+      - ble_client.ble_write:
+          id: epcube
+          service_uuid: "ee6d7170-88c6-11e8-b444-060400ef5315"
+          characteristic_uuid: "ee6d7171-88c6-11e8-b444-060400ef5315"
+          value: !lambda |-
+            uint8_t f[8] = {0x64, 0x03, (uint8_t) (start >> 8), (uint8_t) start,
+                            (uint8_t) (count >> 8), (uint8_t) count, 0, 0};
+            uint16_t crc = 0xFFFF;
+            for (int i = 0; i < 6; i++) {
+              crc ^= f[i];
+              for (int b = 0; b < 8; b++) crc = (crc & 1) ? (crc >> 1) ^ 0xA001 : crc >> 1;
+            }
+            f[6] = crc & 0xFF;
+            f[7] = crc >> 8;
+            char hex[17];
+            for (int i = 0; i < 8; i++) sprintf(hex + 2 * i, "%02X", f[i]);
+            std::string cmd = std::string("{\"RawModbus\":\"") + hex + "\"}";
+            return std::vector<uint8_t>(cmd.begin(), cmd.end());
+
+interval:
+  - interval: ${poll_interval}
+    then:
+      - script.execute: { id: read_block, start: 1296, count: 8 }
+      - delay: 3s
+      - script.execute: { id: read_block, start: 1311, count: 12 }
+      - delay: 3s
+      - script.execute: { id: read_block, start: 1329, count: 4 }
+      - delay: 3s
+      - script.execute: { id: read_block, start: 1340, count: 8 }
+      - delay: 3s
+      - script.execute: { id: read_block, start: 1348, count: 9 }
+      - delay: 3s
+      - script.execute: { id: read_block, start: 1360, count: 7 }
+
+sensor:
+  # Risposte del gateway: decodifica e pubblicazione sui sensori sotto
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: epcube
+    id: epcube_rx
+    internal: true
+    service_uuid: "ee6d7170-88c6-11e8-b444-060400ef5315"
+    characteristic_uuid: "ee6d7172-88c6-11e8-b444-060400ef5315"
+    notify: true
+    update_interval: never
+    lambda: |-
+      std::string s(x.begin(), x.end());
+      size_t p = s.find("RawModbus\":\"");
+      if (p == std::string::npos) return NAN;
+      p += 12;
+      size_t e = s.find('"', p);
+      if (e == std::string::npos) return NAN;
+      std::string hex = s.substr(p, e - p);
+      std::vector<uint8_t> b;
+      for (size_t i = 0; i + 1 < hex.size(); i += 2)
+        b.push_back((uint8_t) strtol(hex.substr(i, 2).c_str(), nullptr, 16));
+      if (b.size() < 5 || b[0] != 0x64 || b[1] != 0x03 || b.size() != (size_t) b[2] + 5) {
+        ESP_LOGW("epcube", "Risposta scartata (incompleta): %s", hex.c_str());
+        return NAN;
+      }
+      uint16_t crc = 0xFFFF;
+      for (size_t i = 0; i < b.size() - 2; i++) {
+        crc ^= b[i];
+        for (int k = 0; k < 8; k++) crc = (crc & 1) ? (crc >> 1) ^ 0xA001 : crc >> 1;
+      }
+      if ((crc & 0xFF) != b[b.size() - 2] || (crc >> 8) != b[b.size() - 1]) {
+        ESP_LOGW("epcube", "Risposta scartata (CRC): %s", hex.c_str());
+        return NAN;
+      }
+      int start = id(pending_start);
+      int n = b[2] / 2;
+      auto reg = [&](int r) -> int {
+        int i = r - start;
+        if (i < 0 || i >= n) return -1;
+        return (b[3 + 2 * i] << 8) | b[4 + 2 * i];
+      };
+      // Potenze: 16 bit con segno, in decine di watt (es. 65534 = -20 W)
+      auto pw = [&](int r) -> float {
+        int v = reg(r);
+        if (v < 0) return NAN;
+        return (v >= 32768 ? v - 65536 : v) * 10.0f;
+      };
+      // Registri a 32 bit: parola bassa nel registro più basso
+      auto reg32 = [&](int lo) -> int64_t {
+        int l = reg(lo), h = reg(lo + 1);
+        if (l < 0 || h < 0) return -1;
+        return ((int64_t) h << 16) | l;
+      };
+      ESP_LOGD("epcube", "Blocco %d grezzo: %s", start, hex.c_str());
+      if (start == 1296) {
+        id(epcube_status_code).publish_state(reg(1296));
+        id(epcube_mode_code).publish_state(reg(1297));
+        id(epcube_soc).publish_state(reg(1301));
+        id(epcube_battery_energy).publish_state(reg(1302) / 100.0f);
+        ESP_LOGI("epcube", "Batteria: SoC %d%%, energia %.2f kWh | stato %d, modalità %d, tempo rimanente %d",
+                 reg(1301), reg(1302) / 100.0f, reg(1296), reg(1297), reg(1303));
+      } else if (start == 1311) {
+        if (reg32(1317) >= 0) id(epcube_grid_import_total).publish_state(reg32(1317) / 100.0f);
+        if (reg32(1319) >= 0) id(epcube_grid_export_total).publish_state(reg32(1319) / 100.0f);
+        if (reg32(1321) >= 0) id(epcube_solar_total).publish_state(reg32(1321) / 100.0f);
+        ESP_LOGI("epcube", "Totali: prelevata %.2f kWh, immessa %.2f kWh, solare %.2f kWh",
+                 reg32(1317) / 100.0f, reg32(1319) / 100.0f, reg32(1321) / 100.0f);
+        // 1311 = potenza di rete (positiva = prelievo), come nell'app
+        id(grid_w) = pw(1311);
+        id(epcube_grid_power).publish_state(id(grid_w));
+        ESP_LOGI("epcube", "Rete: %.0f W (%s)", id(grid_w),
+                 id(grid_w) > 0 ? "prelievo" : (id(grid_w) < 0 ? "immissione" : "ferma"));
+      } else if (start == 1329) {
+        // Contatori del gateway: crescono come quelli del cloud ma partono da
+        // una base diversa (scarto fisso), quindi non coincidono in valore
+        if (reg32(1329) >= 0) id(epcube_backup_load_total).publish_state(reg32(1329) / 100.0f);
+        if (reg32(1331) >= 0) id(epcube_other_load_total).publish_state(reg32(1331) / 100.0f);
+        ESP_LOGI("epcube", "Carichi totali (gateway): backup %.2f kWh, non-backup %.2f kWh",
+                 reg32(1329) / 100.0f, reg32(1331) / 100.0f);
+      } else if (start == 1340) {
+        float solar = pw(1347), backup = pw(1346), other = pw(1345);
+        id(epcube_other_load_power).publish_state(other);
+        id(epcube_backup_load_power).publish_state(backup);
+        id(epcube_solar_power).publish_state(solar);
+        // La batteria non ha un registro: l'app la ricava dal bilancio dei flussi
+        // (positiva = carica, negativa = scarica)
+        float battery = solar + id(grid_w) - backup - other;
+        if (!std::isnan(battery)) id(epcube_battery_power).publish_state(battery);
+        ESP_LOGI("epcube", "Potenze: solare %.0f W, rete %.0f W, carichi %.0f W, batteria %.0f W (%s)",
+                 solar, id(grid_w), backup + other, battery,
+                 battery > 0 ? "carica" : (battery < 0 ? "scarica" : "ferma"));
+      } else if (start == 1348) {
+        id(epcube_grid_import_today).publish_state(reg(1348) / 100.0f);
+        id(epcube_grid_export_today).publish_state(reg(1349) / 100.0f);
+        id(epcube_solar_today).publish_state(reg(1350) / 100.0f);
+        ESP_LOGI("epcube", "Oggi: prelevata %.2f kWh, immessa %.2f kWh, solare %.2f kWh, carichi %.2f kWh",
+                 reg(1348) / 100.0f, reg(1349) / 100.0f, reg(1350) / 100.0f, reg(1354) / 100.0f);
+      } else if (start == 1360) {
+        int warn = reg(1360) | reg(1361) | reg(1362);
+        int fault = reg(1363) | reg(1364) | reg(1365) | reg(1366);
+        id(epcube_warning).publish_state(warn != 0);
+        id(epcube_fault).publish_state(fault != 0);
+        ESP_LOGI("epcube", "Allarmi: %s, guasti: %s", warn ? "SI" : "nessuno", fault ? "SI" : "nessuno");
+      }
+      return NAN;
+
+  - platform: template
+    id: epcube_soc
+    name: "SoC batteria"
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: epcube_battery_energy
+    name: "Energia in batteria"
+    unit_of_measurement: "kWh"
+    device_class: energy_storage
+    state_class: measurement
+    accuracy_decimals: 2
+  - platform: template
+    id: epcube_solar_power
+    name: "Potenza solare"
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: epcube_backup_load_power
+    name: "Potenza carichi di backup"
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: epcube_grid_power
+    name: "Potenza rete"
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: epcube_battery_power
+    name: "Potenza batteria"
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: epcube_other_load_power
+    name: "Potenza carichi non-backup"
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: epcube_backup_load_total
+    name: "Energia carichi di backup totale (gateway)"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+  - platform: template
+    id: epcube_other_load_total
+    name: "Energia carichi non-backup totale (gateway)"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+  - platform: template
+    id: epcube_grid_import_today
+    name: "Energia prelevata oggi"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+  - platform: template
+    id: epcube_grid_export_today
+    name: "Energia immessa oggi"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+  - platform: template
+    id: epcube_solar_today
+    name: "Produzione solare oggi"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+  - platform: template
+    id: epcube_grid_import_total
+    name: "Energia prelevata totale"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+  - platform: template
+    id: epcube_grid_export_total
+    name: "Energia immessa totale"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+  - platform: template
+    id: epcube_solar_total
+    name: "Produzione solare totale"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+  # Codici grezzi: significati nel README dell'integrazione (systemStatus, workStatus)
+  - platform: template
+    id: epcube_status_code
+    name: "Stato gateway (codice)"
+    entity_category: diagnostic
+    accuracy_decimals: 0
+  - platform: template
+    id: epcube_mode_code
+    name: "Modalità (codice)"
+    entity_category: diagnostic
+    accuracy_decimals: 0
+
+binary_sensor:
+  - platform: template
+    id: epcube_warning
+    name: "Avviso presente"
+    device_class: problem
+  - platform: template
+    id: epcube_fault
+    name: "Guasto presente"
+    device_class: problem

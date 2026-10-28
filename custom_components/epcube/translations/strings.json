@@ -481,6 +481,14 @@
       "last_update": {
         "name": "Last update"
       },
+      "battery_status": {
+        "name": "Battery Status",
+        "state": {
+          "charging": "Charging",
+          "discharging": "Discharging",
+          "idle": "Idle"
+        }
+      },
       "total_load_power": {
         "name": "Total load power"
       },

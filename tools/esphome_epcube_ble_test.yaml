@@ -1,0 +1,153 @@
+# Prova di lettura locale EP Cube via Bluetooth (solo lettura).
+#
+# Passo 1: flasha così com'è, apri i log e cerca le righe "EP Cube trovato":
+#          annota il MAC del gateway. Il nome è "EPCUBE_E-<parte del numero
+#          di serie>" (l'app lo riconosce così); i gateway più vecchi usano
+#          "MoonFlow".
+# Passo 2 (attivo): MAC impostato, ogni 30 s legge i registri live e stampa
+#          le risposte Modbus nei log. I gateway "EPCUBE-..." (tipo vecchio)
+#          si collegano senza abbinamento.
+#
+# Il protocollo è quello dell'app EP Cube: JSON {"RawModbus": "<frame RTU hex>"}
+# scritto su ee6d7171-..., risposta in notifica su ee6d7172-...
+# Frame: slave 0x64, funzione 03 (lettura), registro, quantità, CRC16.
+
+substitutions:
+  epcube_mac: "80:64:6F:DD:33:B6"   # gateway EPCUBE-0324208235
+
+esphome:
+  name: epcube-ble-test
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+ota:
+  - platform: esphome
+
+# I gateway EPCUBE_E vengono abbinati dall'app (bonding): l'ESP32 accetta
+# l'abbinamento senza codice, come un telefono senza tastiera
+esp32_ble:
+  io_capability: none
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+  on_ble_advertise:
+    - then:
+        - lambda: |-
+            const std::string &name = x.get_name();
+            if (name.find("EPCUBE") != std::string::npos ||
+                name.find("MoonFlow") != std::string::npos ||
+                name.find("Moonflow") != std::string::npos) {
+              uint64_t a = x.address_uint64();
+              ESP_LOGI("epcube", "EP Cube trovato: nome=%s MAC=%02X:%02X:%02X:%02X:%02X:%02X RSSI=%d",
+                       name.c_str(),
+                       (unsigned) ((a >> 40) & 0xFF), (unsigned) ((a >> 32) & 0xFF),
+                       (unsigned) ((a >> 24) & 0xFF), (unsigned) ((a >> 16) & 0xFF),
+                       (unsigned) ((a >> 8) & 0xFF), (unsigned) (a & 0xFF),
+                       x.get_rssi());
+            }
+
+# ---------------- Passo 2: lettura dei registri ----------------
+ble_client:
+  - mac_address: ${epcube_mac}
+    id: epcube
+    on_connect:
+      then:
+        - logger.log: "Connesso al gateway EP Cube"
+    on_disconnect:
+      then:
+        - logger.log: "Disconnesso dal gateway EP Cube"
+
+sensor:
+  # Risposte del gateway: vengono solo stampate nel log
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: epcube
+    id: epcube_rx
+    name: "EP Cube risposta grezza"
+    service_uuid: "ee6d7170-88c6-11e8-b444-060400ef5315"
+    characteristic_uuid: "ee6d7172-88c6-11e8-b444-060400ef5315"
+    notify: true
+    # La caratteristica funziona solo a notifiche: niente letture periodiche
+    update_interval: never
+    lambda: |-
+      std::string s(x.begin(), x.end());
+      ESP_LOGI("epcube", "Risposta: %s", s.c_str());
+      return NAN;
+
+interval:
+  - interval: 60s
+    then:
+      # 1296-1303: stato, modalità, SoC, energia batteria, tempo rimanente
+      - ble_client.ble_write:
+          id: epcube
+          service_uuid: "ee6d7170-88c6-11e8-b444-060400ef5315"
+          characteristic_uuid: "ee6d7171-88c6-11e8-b444-060400ef5315"
+          value: !lambda |-
+            std::string cmd = "{\"RawModbus\":\"6403051000084CF0\"}";
+            return std::vector<uint8_t>(cmd.begin(), cmd.end());
+      - delay: 3s
+      # 1311-1322: direzioni/potenze rete, EV, energie rete e solare
+      - ble_client.ble_write:
+          id: epcube
+          service_uuid: "ee6d7170-88c6-11e8-b444-060400ef5315"
+          characteristic_uuid: "ee6d7171-88c6-11e8-b444-060400ef5315"
+          value: !lambda |-
+            std::string cmd = "{\"RawModbus\":\"6403051F000C7D30\"}";
+            return std::vector<uint8_t>(cmd.begin(), cmd.end());
+      - delay: 3s
+      # 1323-1328: energie solare (in), generatore, EV
+      - ble_client.ble_write:
+          id: epcube
+          service_uuid: "ee6d7170-88c6-11e8-b444-060400ef5315"
+          characteristic_uuid: "ee6d7171-88c6-11e8-b444-060400ef5315"
+          value: !lambda |-
+            std::string cmd = "{\"RawModbus\":\"6403052B0006BCF9\"}";
+            return std::vector<uint8_t>(cmd.begin(), cmd.end());
+      - delay: 3s
+      # 1329-1334: energie carichi backup e non-backup
+      - ble_client.ble_write:
+          id: epcube
+          service_uuid: "ee6d7170-88c6-11e8-b444-060400ef5315"
+          characteristic_uuid: "ee6d7171-88c6-11e8-b444-060400ef5315"
+          value: !lambda |-
+            std::string cmd = "{\"RawModbus\":\"6403053100069D3E\"}";
+            return std::vector<uint8_t>(cmd.begin(), cmd.end());
+      - delay: 3s
+      # 1340-1347: RESS, direzioni carichi e solare
+      - ble_client.ble_write:
+          id: epcube
+          service_uuid: "ee6d7170-88c6-11e8-b444-060400ef5315"
+          characteristic_uuid: "ee6d7171-88c6-11e8-b444-060400ef5315"
+          value: !lambda |-
+            std::string cmd = "{\"RawModbus\":\"6403053C00088D39\"}";
+            return std::vector<uint8_t>(cmd.begin(), cmd.end());
+      - delay: 3s
+      # 1348-1356: energie del giorno
+      - ble_client.ble_write:
+          id: epcube
+          service_uuid: "ee6d7170-88c6-11e8-b444-060400ef5315"
+          characteristic_uuid: "ee6d7171-88c6-11e8-b444-060400ef5315"
+          value: !lambda |-
+            std::string cmd = "{\"RawModbus\":\"640305440009CCE0\"}";
+            return std::vector<uint8_t>(cmd.begin(), cmd.end());
+      - delay: 3s
+      # 1360-1366: avvisi e guasti
+      - ble_client.ble_write:
+          id: epcube
+          service_uuid: "ee6d7170-88c6-11e8-b444-060400ef5315"
+          characteristic_uuid: "ee6d7171-88c6-11e8-b444-060400ef5315"
+          value: !lambda |-
+            std::string cmd = "{\"RawModbus\":\"6403055000070D20\"}";
+            return std::vector<uint8_t>(cmd.begin(), cmd.end());

@@ -1,4 +1,7 @@
-from homeassistant.const import UnitOfEnergy, UnitOfPower, UnitOfTime, PERCENTAGE
+from homeassistant.const import (
+    UnitOfEnergy, UnitOfPower, UnitOfTime, PERCENTAGE,
+    UnitOfElectricCurrent, UnitOfElectricPotential,
+)
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.util import dt as dt_util
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass, SensorEntityDescription, SensorEntity
@@ -13,7 +16,7 @@ from .const import (
     DOMAIN, DEFAULT_SCAN_INTERVAL, CONF_ENABLE_TOTAL, CONF_ENABLE_ANNUAL, 
     CONF_ENABLE_MONTHLY, get_base_url, USER_AGENT, HTTP_TIMEOUT, 
     HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY, STATS_TIMEOUT,
-    BATTERY_POWER_DEADBAND_KW
+    BATTERY_POWER_DEADBAND_KW, BATTERY_STATUS_IDLE_KW
 )
 from .translations import translate_field_name, translate_status_value, SYSTEM_STATUS_OPTIONS
 from .extras import async_fetch_settings, async_fetch_slow_extras, async_fetch_pv_power
@@ -680,6 +683,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EpCubeBatteryDailyChargeSensor(coordinator),
         EpCubeBatteryDailyDischargeSensor(coordinator),
         EpCubeBatteryPowerSensor(coordinator),
+        EpCubeBatteryStatusSensor(coordinator),
         EpCubeTotalLoadPowerSensor(coordinator),
         EpCubeTotalLoadEnergySensor(coordinator),
         # Sensori giorno precedente
@@ -705,6 +709,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EpCubeAlertSensor(coordinator, "faults", "last_fault"),
         EpCubeWifiSensor(coordinator),
         EpCubeFirmwareSensor(coordinator),
+        EpCubeAuthoritySensor(coordinator, "kebaAuthority"),
+        EpCubeAuthoritySensor(coordinator, "eebusAuthority"),
+        EpCubeAuthoritySensor(coordinator, "triphaseAuthority"),
     ] + [
         EpCubePvStringSensor(coordinator, key)
         for key, value in sorted(((coordinator.data or {}).get("pv") or {}).items())
@@ -1014,6 +1021,74 @@ class EpCubeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         )
 
         return value
+
+
+class EpCubeBatteryStatusSensor(CoordinatorEntity, SensorEntity):
+    """Stato batteria (in carica / in scarica / ferma) dal segno della potenza.
+
+    Deriva dallo stesso bilancio di EpCubeBatteryPowerSensor: batteria =
+    solare + rete - carichi. Dentro il deadband la batteria è ferma.
+    """
+
+    # Testo leggibile per ciascuno stato, esposto come attributo "scritta".
+    STATUS_LABELS = {
+        "charging": "In carica",
+        "discharging": "In scarica",
+        "idle": "Ferma",
+    }
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = "epcube_battery_status"
+        self._attr_translation_key = "battery_status"
+        self._attr_has_entity_name = True
+        self._attr_device_class = SensorDeviceClass.ENUM
+        self._attr_options = ["charging", "discharging", "idle"]
+        self._attr_icon = "mdi:battery-charging"
+        self._last_status = "idle"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    def _compute_status(self):
+        data = self.coordinator.data.get("data", {})
+
+        produzione = data.get("solarpower")
+        consumo = data.get("backuppower")
+        rete = data.get("gridtotalpower")
+
+        if produzione is None or consumo is None or rete is None:
+            return None
+
+        non_backup = data.get("nonbackuppower") or 0
+        power_kw = 10 * (float(produzione) + float(rete) - float(consumo) - float(non_backup)) / 1000
+
+        # Isteresi: si entra in carica/scarica oltre ±DEADBAND e si torna a
+        # ferma solo sotto IDLE_KW; nella fascia intermedia si tiene lo stato
+        # precedente per non oscillare.
+        if power_kw > BATTERY_POWER_DEADBAND_KW:
+            status = "charging"
+        elif power_kw < -BATTERY_POWER_DEADBAND_KW:
+            status = "discharging"
+        elif abs(power_kw) < BATTERY_STATUS_IDLE_KW:
+            status = "idle"
+        else:
+            status = self._last_status
+
+        self._last_status = status
+        return status
+
+    @property
+    def native_value(self):
+        return self._compute_status()
+
+    @property
+    def extra_state_attributes(self):
+        status = self._last_status
+        return {"scritta": self.STATUS_LABELS.get(status, status)}
 
 
 class EpCubeTotalLoadPowerSensor(CoordinatorEntity, SensorEntity):
@@ -1345,6 +1420,7 @@ class EpCubeLastPowerCutSensor(EpCubeExtrasSensor):
 
     extras_key = "power_cuts"
     _attr_icon = "mdi:transmission-tower-off"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator):
         super().__init__(coordinator, "last_power_cut")
@@ -1378,6 +1454,7 @@ class EpCubeEarningSensor(EpCubeExtrasSensor):
     """Guadagno calcolato dal cloud (earningsGraph), con la valuta dell'impianto."""
 
     _attr_icon = "mdi:cash"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator, key):
         super().__init__(coordinator, key)
@@ -1399,6 +1476,7 @@ class EpCubeWeatherSensor(EpCubeExtrasSensor):
 
     extras_key = "weather"
     _attr_icon = "mdi:weather-partly-cloudy"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator):
         super().__init__(coordinator, "weather")
@@ -1421,19 +1499,36 @@ class EpCubeWeatherSensor(EpCubeExtrasSensor):
 
 
 class EpCubePvStringSensor(CoordinatorEntity, SensorEntity):
-    """Potenza di una stringa FV (getSolarPvPower), in kW come nell'app."""
+    """Grandezza di una stringa FV (getSolarPvPower): potenza, corrente o tensione.
+
+    getSolarPvPower restituisce per ogni stringa pvNpower (kW), pvNcurrent (A) e
+    pvNvoltage (V): ognuna va presentata con nome, unità e device class propri,
+    non tutte come potenza (era il bug: 'Potenza Stringa PV1current').
+    """
 
     _attr_has_entity_name = True
-    _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
     _attr_icon = "mdi:solar-panel"
+
+    # suffisso chiave -> (translation_key, device_class, unità)
+    _MEASURES = {
+        "power": ("pv_string_power", SensorDeviceClass.POWER, UnitOfPower.KILO_WATT),
+        "current": ("pv_string_current", SensorDeviceClass.CURRENT,
+                    UnitOfElectricCurrent.AMPERE),
+        "voltage": ("pv_string_voltage", SensorDeviceClass.VOLTAGE,
+                    UnitOfElectricPotential.VOLT),
+    }
 
     def __init__(self, coordinator, key):
         super().__init__(coordinator)
         self._key = key
-        number = key.removeprefix("pv").removesuffix("power")
-        self._attr_translation_key = "pv_string_power"
+        # Riconosce il tipo dal suffisso; default a potenza per retrocompatibilità
+        measure = next((m for m in ("current", "voltage") if key.endswith(m)), "power")
+        translation_key, device_class, unit = self._MEASURES[measure]
+        number = key.removeprefix("pv").removesuffix(measure)
+        self._attr_translation_key = translation_key
+        self._attr_device_class = device_class
+        self._attr_native_unit_of_measurement = unit
         self._attr_translation_placeholders = {"number": number}
         self._attr_unique_id = f"epcube_{key}"
         self._attr_device_info = {
@@ -1458,10 +1553,43 @@ class EpCubePvStringSensor(CoordinatorEntity, SensorEntity):
             return None
 
 
+class EpCubeAuthoritySensor(CoordinatorEntity, SensorEntity):
+    """Autorizzazione/capacità dell'account (user/user/base -> tblDevice).
+
+    Flag come kebaAuthority, eebusAuthority, triphaseAuthority: decidono quali
+    funzioni l'app mostra. Diagnostici, disabilitati di default.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:shield-key-outline"
+
+    def __init__(self, coordinator, field):
+        super().__init__(coordinator)
+        self._field = field
+        self._attr_translation_key = field.lower()
+        self._attr_unique_id = f"epcube_{field.lower()}"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def native_value(self):
+        extras = (self.coordinator.data or {}).get("extras") or {}
+        device = extras.get("user_device") or {}
+        value = device.get(self._field)
+        return str(value) if value is not None else None
+
+
 class EpCubeAlertSensor(EpCubeExtrasSensor):
     """Ultimo avviso o guasto (getAlertFaultList), testo e soluzione in inglese."""
 
     _attr_icon = "mdi:alert-circle-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator, extras_key, key):
         super().__init__(coordinator, key)
@@ -1469,11 +1597,12 @@ class EpCubeAlertSensor(EpCubeExtrasSensor):
 
     @property
     def native_value(self):
-        # Elenco vuoto: nessun avviso, il sensore resta senza valore
+        # Elenco vuoto: nessun avviso/guasto attivo. Si riporta "Nessuno" invece
+        # di None, così lo stato dice chiaramente "tutto ok" e non "unknown".
         if not self._extra:
-            return None
+            return "Nessuno"
         content = self._extra[0].get("enContent") or ""
-        return content[:255] or None
+        return content[:255] or "Nessuno"
 
     @property
     def extra_state_attributes(self):
