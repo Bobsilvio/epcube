@@ -39,7 +39,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     DOMAIN, USER_AGENT, HTTP_TIMEOUT, HTTP_CONNECT_TIMEOUT, get_base_url,
-    CONF_USERNAME, CONF_PASSWORD,
+    CONF_USERNAME, CONF_PASSWORD, api_language,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,13 +51,14 @@ CAPTCHA_Y = 5
 # con scan_interval di pochi secondi si risolverebbero captcha a raffica
 RELOGIN_COOLDOWN = 60  # seconds
 
-_HEADERS = {
-    "accept": "*/*",
-    "content-type": "application/json",
-    "accept-language": "it-IT",
-    "accept-encoding": "gzip, deflate, br",
-    "user-agent": USER_AGENT,
-}
+def _headers():
+    return {
+        "accept": "*/*",
+        "content-type": "application/json",
+        "accept-language": api_language(),
+        "accept-encoding": "gzip, deflate, br",
+        "user-agent": USER_AGENT,
+    }
 
 
 class EpCubeLoginError(Exception):
@@ -262,7 +263,7 @@ def _captcha_accepted(check) -> bool:
 async def _post(session, url, payload) -> dict:
     timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT)
     try:
-        async with session.post(url, headers=_HEADERS, json=payload, timeout=timeout) as resp:
+        async with session.post(url, headers=_headers(), json=payload, timeout=timeout) as resp:
             # Gli errori applicativi (credenziali, captcha) arrivano come JSON
             # anche con status 4xx: si scarta solo l'errore del server
             if resp.status >= 500:

@@ -209,27 +209,6 @@ FIELD_TRANSLATIONS = {
     "sellingenable": "Esportazione Solare DC",
 }
 
-# Modalità operative
-OPERATION_MODES = {
-    "1": "Autoconsumo",
-    "2": "Tariffazione",
-    "3": "Backup",
-}
-
-# Stato gateway (campo API systemStatus)
-# Valori confermati dal supporto EP Cube e dalla console installatori
-# (deviceDetail: 1 -> fault, 5 -> notTurnedOn)
-SYSTEM_STATUS = {
-    "0": "Autotest",
-    "1": "Guasto",
-    "2": "Inattivo",
-    "3": "Standby",
-    "4": "In funzione",
-    "5": "Non alimentato",
-    "6": "Bassa potenza",
-    "7": "In protezione",
-}
-
 # Mappa numero -> chiave di traduzione HA per il sensore enum
 SYSTEM_STATUS_OPTIONS = {
     "0": "self_test",
@@ -242,54 +221,28 @@ SYSTEM_STATUS_OPTIONS = {
     "7": "under_protection",
 }
 
-# Collegamento dei carichi al backup. Nell'app (2.6.2) il valore 0 indica un
-# impianto con carichi non-backup (backup parziale) e fa comparire il nodo
-# "Non-Backup" nel flusso; backUpType è il campo dei firmware precedenti,
-# backupLoadsMode quello dei nuovi. Gli altri valori non sono distinti dall'app
-BACKUP_TYPE = {
-    "0": "Backup parziale (con carichi non-backup)",
-    "1": "Backup intera casa",
-}
-BACKUP_LOADS_MODE = BACKUP_TYPE
-
-# Tipo connessione
-NETWORKING_TYPE = {
-    "0": "Offline",
-    "1": "Wi-Fi",
-    "2": "Ethernet",
-    "3": "4G/LTE",
-}
-
-# Tipo fonte data
-FROM_TYPE = {
-    "0": "Locale",
-    "1": "Cloud",
-    "2": "Sincronizzato",
-}
-
 def translate_field_name(field_name: str) -> str:
     """Traduce il nome di un campo API in italiano."""
     field_lower = field_name.lower()
     return FIELD_TRANSLATIONS.get(field_lower, field_name)
 
-def translate_status_value(field_name: str, value) -> str:
-    """Traduce il valore di uno stato in italiano."""
-    field_lower = field_name.lower()
-    value_str = str(value)
-    
-    if field_lower == "workstatus":
-        return OPERATION_MODES.get(value_str, value_str)
-    elif field_lower == "systemstatus":
-        return SYSTEM_STATUS.get(value_str, value_str)
-    elif field_lower == "backuptype":
-        return BACKUP_TYPE.get(value_str, value_str)
-    elif field_lower == "backuploadsmode":
-        return BACKUP_LOADS_MODE.get(value_str, value_str)
-    elif field_lower == "networking":
-        return NETWORKING_TYPE.get(value_str, value_str)
-    elif field_lower == "fromtype":
-        return FROM_TYPE.get(value_str, value_str)
-    elif field_lower in ["isonline", "isalert", "isfault", "isnewdevice", "existssg"]:
-        return "Sì" if value in ["1", 1, True, "true"] else "No"
-    
-    return value_str
+
+# Testi che l'integrazione scrive come valore di un sensore: seguono la lingua
+# di Home Assistant (inglese per le lingue non elencate)
+LOCAL_TEXTS = {
+    "it": {
+        "none": "Nessuno",
+        "not_configured": "Non configurato",
+        "days": ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"],
+    },
+    "en": {
+        "none": "None",
+        "not_configured": "Not configured",
+        "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+    },
+}
+
+
+def local_text(hass, key):
+    language = (hass.config.language or "en").split("-")[0].lower()
+    return LOCAL_TEXTS.get(language, LOCAL_TEXTS["en"])[key]

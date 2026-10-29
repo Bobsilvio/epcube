@@ -16,9 +16,9 @@ from .const import (
     DOMAIN, DEFAULT_SCAN_INTERVAL, CONF_ENABLE_TOTAL, CONF_ENABLE_ANNUAL, 
     CONF_ENABLE_MONTHLY, get_base_url, USER_AGENT, HTTP_TIMEOUT, 
     HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY, STATS_TIMEOUT,
-    BATTERY_POWER_DEADBAND_KW, BATTERY_STATUS_IDLE_KW
+    BATTERY_POWER_DEADBAND_KW, BATTERY_STATUS_IDLE_KW, api_language,
 )
-from .translations import translate_field_name, translate_status_value, SYSTEM_STATUS_OPTIONS
+from .translations import translate_field_name, SYSTEM_STATUS_OPTIONS, local_text
 from .extras import (
     async_fetch_settings, async_fetch_slow_extras, async_fetch_pv_power,
     async_fetch_battery_series,
@@ -303,7 +303,7 @@ async def fetch_device_info(session, token, dev_id, region, timeout=STATS_TIMEOU
     url = f"{base_url}/device/userDeviceInfo?devId={dev_id}"
     headers = {
         "accept": "*/*",
-        "accept-language": "it-IT",
+        "accept-language": api_language(),
         "accept-encoding": "gzip, deflate, br",
         "user-agent": USER_AGENT,
         "authorization": token
@@ -342,7 +342,7 @@ async def fetch_device_list(session, token, dev_id, region, timeout=STATS_TIMEOU
     url = f"{base_url}/device/deviceList"
     headers = {
         "accept": "*/*",
-        "accept-language": "it-IT",
+        "accept-language": api_language(),
         "accept-encoding": "gzip, deflate, br",
         "user-agent": USER_AGENT,
         "authorization": token
@@ -389,7 +389,7 @@ async def fetch_switch_mode(session, token, dev_id, region, timeout=STATS_TIMEOU
     url = f"{base_url}/device/getSwitchMode?devId={dev_id}"
     headers = {
         "accept": "*/*",
-        "accept-language": "it-IT",
+        "accept-language": api_language(),
         "accept-encoding": "gzip, deflate, br",
         "user-agent": USER_AGENT,
         "authorization": token
@@ -427,7 +427,7 @@ async def fetch_epcube_stats(session, token, dev_id, date_str, scope_type, regio
     url = f"{base_url}/device/queryDataElectricityV2?devId={dev_id}&queryDateStr={date_str}&scopeType={scope_type}"
     headers = {
         "accept": "*/*",
-        "accept-language": "it-IT",
+        "accept-language": api_language(),
         "accept-encoding": "gzip, deflate, br",
         "user-agent": USER_AGENT,
         "authorization": token
@@ -1338,18 +1338,7 @@ class EpCubeTouActiveWeeksSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self.week_type = week_type
         self.coordinator = coordinator
-        
-        # Giorni della settimana
-        self.day_names = {
-            1: "Lunedì",
-            2: "Martedì",
-            3: "Mercoledì",
-            4: "Giovedì",
-            5: "Venerdì",
-            6: "Sabato",
-            7: "Domenica"
-        }
-        
+
         if week_type == "workday":
             self._attr_has_entity_name = True
             self._attr_translation_key = "tou_active_week"
@@ -1376,11 +1365,12 @@ class EpCubeTouActiveWeeksSensor(CoordinatorEntity, SensorEntity):
         data = self.coordinator.data.get("data", {})
         days = data.get(self.key, [])
         
-        if not days or len(days) == 0:
-            return "Non configurato"
-        
-        day_names = [self.day_names.get(d, f"Giorno {d}") for d in days]
-        return ", ".join(day_names)
+        if not days:
+            return local_text(self.hass, "not_configured")
+
+        names = local_text(self.hass, "days")
+        numbers = sorted(int(d) for d in days if str(d).isdigit() and 1 <= int(d) <= 7)
+        return ", ".join(names[d - 1] for d in numbers)
 
 
 class EpCubeExtrasSensor(CoordinatorEntity, SensorEntity):
@@ -1594,10 +1584,11 @@ class EpCubeAlertSensor(EpCubeExtrasSensor):
     def native_value(self):
         # Elenco vuoto: nessun avviso/guasto attivo. Si riporta "Nessuno" invece
         # di None, così lo stato dice chiaramente "tutto ok" e non "unknown".
+        none = local_text(self.hass, "none")
         if not self._extra:
-            return "Nessuno"
+            return none
         content = self._extra[0].get("enContent") or ""
-        return content[:255] or "Nessuno"
+        return content[:255] or none
 
     @property
     def extra_state_attributes(self):

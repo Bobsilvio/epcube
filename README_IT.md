@@ -127,7 +127,7 @@ In **Impostazioni → Dashboard → Energia**:
 
 ## Automazioni
 
-I comandi sopra si usano nelle automazioni come qualsiasi entità (`select.select_option`, `number.set_value`, `text.set_value`). In più ci sono azioni dedicate:
+I comandi sopra si usano nelle automazioni come qualsiasi entità (`select.select_option`, `number.set_value`, `text.set_value`). Per **Modalità** le opzioni sono `self_consumption`, `time_of_use`, `backup` e `dynamic_tariff`. In più ci sono azioni dedicate:
 
 | Azione | A cosa serve |
 |---|---|

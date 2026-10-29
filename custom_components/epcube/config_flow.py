@@ -9,7 +9,7 @@ from .const import (
     DOMAIN, DEFAULT_SCAN_INTERVAL, CONF_SCALE_POWER,
     CONF_ENABLE_TOTAL, CONF_ENABLE_ANNUAL, CONF_ENABLE_MONTHLY, get_base_url,
     USER_AGENT, HTTP_TIMEOUT, HTTP_CONNECT_TIMEOUT, MAX_RETRIES, RETRY_DELAY,
-    CONF_USERNAME, CONF_PASSWORD,
+    CONF_USERNAME, CONF_PASSWORD, api_language, set_api_language,
 )
 from .auth import async_login, InvalidCredentials, CaptchaFailed, EpCubeLoginError
 
@@ -44,6 +44,7 @@ class EpCubeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._errors = {}
 
     async def async_step_user(self, user_input=None):
+        set_api_language(self.hass.config.language)
         return self.async_show_menu(step_id="user", menu_options=["credentials", "token"])
 
     async def async_step_credentials(self, user_input=None):
@@ -160,7 +161,7 @@ class EpCubeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         url = f"{base_url}/user/user/base"
         headers = {
             "accept": "*/*",
-            "accept-language": "it-IT",
+            "accept-language": api_language(),
             "accept-encoding": "gzip, deflate, br",
             "user-agent": USER_AGENT,
             "authorization": token

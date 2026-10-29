@@ -119,7 +119,7 @@ In **Settings → Dashboards → Energy**:
 
 ## Automations
 
-The controls above work in automations like any entity (`select.select_option`, `number.set_value`, `text.set_value`). There are also dedicated actions:
+The controls above work in automations like any entity (`select.select_option`, `number.set_value`, `text.set_value`). For **Operating mode** the options are `self_consumption`, `time_of_use`, `backup` and `dynamic_tariff`. There are also dedicated actions:
 
 | Action | What it does |
 |---|---|

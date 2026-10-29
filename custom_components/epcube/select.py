@@ -5,7 +5,6 @@ from .entity import bind_entities_to_entry
 from .payload import build_switch_mode_payload
 from .api import async_post_switch_mode
 from .const import DOMAIN
-from .translations import OPERATION_MODES
 from .override import CHARGE, DISCHARGE, HOLD
 
 from homeassistant.exceptions import HomeAssistantError
@@ -15,16 +14,17 @@ import json
 
 _LOGGER = logging.getLogger(__name__)
 
+# Opzioni tradotte da translations/*.json (entity.select.operating_mode.state)
 MODE_MAP = {
-    "1": "Autoconsumo",
-    "2": "Tariffazione",
-    "3": "Backup",
+    "1": "self_consumption",
+    "2": "time_of_use",
+    "3": "backup",
 }
 REVERSE_MODE_MAP = {v: k for k, v in MODE_MAP.items()}
 
 # Tariffa dinamica (app EU): workStatus 2 con touType "1"; la Tariffazione a
 # fasce è workStatus 2 con touType "0"
-DYNAMIC_OPTION = "Tariffa dinamica"
+DYNAMIC_OPTION = "dynamic_tariff"
 
 
 def _dynamic_available(data):

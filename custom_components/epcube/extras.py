@@ -15,7 +15,7 @@ Un endpoint che risponde 404 non esiste sul server della regione e non viene
 più richiesto fino al reload (sul server EU getSettingsData ed earningsGraph).
 """
 
-from .const import get_base_url, USER_AGENT, STATS_TIMEOUT
+from .const import get_base_url, USER_AGENT, STATS_TIMEOUT, api_language
 
 from datetime import date, datetime
 from functools import partial
@@ -47,7 +47,7 @@ async def async_fetch_api_data(session, token, region, path, timeout=STATS_TIMEO
     url = f"{get_base_url(region)}{path}"
     headers = {
         "accept": "*/*",
-        "accept-language": "it-IT",
+        "accept-language": api_language(),
         "accept-encoding": "gzip, deflate, br",
         "user-agent": USER_AGENT,
         "authorization": token,

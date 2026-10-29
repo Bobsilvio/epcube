@@ -1526,7 +1526,13 @@
     },
     "select": {
       "operating_mode": {
-        "name": "Operating mode"
+        "name": "Operating mode",
+        "state": {
+          "self_consumption": "Self-consumption",
+          "time_of_use": "Time of use",
+          "backup": "Backup",
+          "dynamic_tariff": "Dynamic tariff"
+        }
       },
       "battery_override": {
         "name": "Battery override",

@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from .const import get_base_url, USER_AGENT, STATS_TIMEOUT
+from .const import get_base_url, USER_AGENT, STATS_TIMEOUT, api_language
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ async def _async_invia(session, token, region, percorso, corpo=None):
     url = f"{get_base_url(region)}{percorso}"
     headers = {
         "accept": "*/*",
-        "accept-language": "it-IT",
+        "accept-language": api_language(),
         "content-type": "application/json",
         "user-agent": USER_AGENT,
         "authorization": token,

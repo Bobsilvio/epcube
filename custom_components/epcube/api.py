@@ -7,7 +7,7 @@ ClientSession senza timeout e senza ritentare. Qui c'è una sola implementazione
 
 from .const import (
     get_base_url, USER_AGENT, HTTP_TIMEOUT, HTTP_CONNECT_TIMEOUT,
-    MAX_RETRIES, RETRY_DELAY,
+    MAX_RETRIES, RETRY_DELAY, api_language,
 )
 
 from .auth import async_refresh_token, InvalidCredentials
@@ -100,7 +100,7 @@ async def _async_post(hass, entry, path, payload, label):
         "content-type": "application/json",
         "authorization": entry_token(entry),
         "user-agent": USER_AGENT,
-        "accept-language": "it-IT",
+        "accept-language": api_language(),
         "accept-encoding": "gzip, deflate, br",
     }
     relogged = False

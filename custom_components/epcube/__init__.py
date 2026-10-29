@@ -2,7 +2,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError, ServiceValidationError
 from .const import (
-    DOMAIN, PLATFORMS, DEFAULT_SCAN_INTERVAL, get_base_url, USER_AGENT,
+    DOMAIN, PLATFORMS, DEFAULT_SCAN_INTERVAL, get_base_url, USER_AGENT, api_language, set_api_language,
 )
 from .sensor import async_update_data_with_stats, EpCubeAuthError
 from .state import EpCubeDataState
@@ -32,6 +32,7 @@ SERVICE_CLEAR_BATTERY_OVERRIDE = "clear_battery_override"
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
+    set_api_language(hass.config.language)
 
     sn = entry.data["sn"]
     region = entry.options.get("region") or entry.data.get("region", "EU")
@@ -47,7 +48,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         token = entry_token(entry)
         headers = {
             "accept": "*/*",
-            "accept-language": "it-IT",
+            "accept-language": api_language(),
             "accept-encoding": "gzip, deflate, br",
             "user-agent": USER_AGENT,
             "authorization": token

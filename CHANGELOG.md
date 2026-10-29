@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.9.0
+
+### ⚠️ Breaking change
+- **Operating mode** options are now translated by Home Assistant. Automations
+  that call `select.select_option` must use the new option values:
+
+  | Before | Now |
+  |---|---|
+  | `Autoconsumo` | `self_consumption` |
+  | `Tariffazione` | `time_of_use` |
+  | `Backup` | `backup` |
+  | `Tariffa dinamica` | `dynamic_tariff` |
+
+  Triggers or conditions on the state of the select change the same way. The
+  `epcube.set_operating_mode` action is unchanged.
+
+### Changed
+- Texts that come from the EP Cube cloud (weather, Wi-Fi status, tips) now use
+  Home Assistant's language instead of always Italian.
+- Time of use days and the empty value of last warning / last fault follow
+  Home Assistant's language; the days are listed in week order.
+
 ## v1.8.0
 
 ### Changed

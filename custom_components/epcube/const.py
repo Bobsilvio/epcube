@@ -44,3 +44,18 @@ BASE_URLS = {
 
 def get_base_url(region: str) -> str:
     return BASE_URLS.get(region.upper(), BASE_URLS["EU"])
+
+# Lingua dei testi che il cloud restituisce (meteo, Wi-Fi, avvisi, suggerimenti):
+# segue quella di Home Assistant, impostata al setup con set_api_language
+_API_LANGUAGES = {"it": "it-IT", "en": "en-US", "de": "de-DE", "fr": "fr-FR", "es": "es-ES", "ja": "ja-JP"}
+_api_language = "en-US"
+
+
+def set_api_language(ha_language: str | None) -> None:
+    global _api_language
+    base = (ha_language or "en").split("-")[0].lower()
+    _api_language = _API_LANGUAGES.get(base, ha_language or "en-US")
+
+
+def api_language() -> str:
+    return _api_language
