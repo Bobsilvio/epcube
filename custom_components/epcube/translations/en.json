@@ -1349,24 +1349,6 @@
       "total_load_energy": {
         "name": "Total load energy (today)"
       },
-      "tou_peak_times": {
-        "name": "TOU peak times"
-      },
-      "tou_midpeak_times": {
-        "name": "TOU mid-peak times"
-      },
-      "tou_offpeak_times": {
-        "name": "TOU off-peak times"
-      },
-      "tou_daylight_peak_times": {
-        "name": "TOU daylight saving peak times"
-      },
-      "tou_daylight_midpeak_times": {
-        "name": "TOU daylight saving mid-peak times"
-      },
-      "tou_daylight_offpeak_times": {
-        "name": "TOU daylight saving off-peak times"
-      },
       "tou_active_week": {
         "name": "TOU active days (workdays)"
       },
@@ -1511,24 +1493,6 @@
       "backup_reserve_soc": {
         "name": "Backup reserve SoC"
       },
-      "tou_peak_start": {
-        "name": "TOU peak start (HH:00)"
-      },
-      "tou_peak_end": {
-        "name": "TOU peak end (HH:00)"
-      },
-      "tou_midpeak_start": {
-        "name": "TOU mid-peak start (HH:00)"
-      },
-      "tou_midpeak_end": {
-        "name": "TOU mid-peak end (HH:00)"
-      },
-      "tou_offpeak_start": {
-        "name": "TOU off-peak start (HH:00)"
-      },
-      "tou_offpeak_end": {
-        "name": "TOU off-peak end (HH:00)"
-      },
       "sleep_mode_soc": {
         "name": "Sleep mode SoC"
       },
@@ -1543,16 +1507,56 @@
       },
       "dynamic_discharge_price": {
         "name": "Dynamic tariff target sell price"
+      },
+      "override_target_soc": {
+        "name": "Override target SoC"
+      },
+      "override_duration": {
+        "name": "Override duration"
+      },
+      "tou_peak_price": {
+        "name": "Peak-rate price"
+      },
+      "tou_midpeak_price": {
+        "name": "Mid-rate price"
+      },
+      "tou_offpeak_price": {
+        "name": "Off-peak price"
       }
     },
     "select": {
       "operating_mode": {
         "name": "Operating mode"
+      },
+      "battery_override": {
+        "name": "Battery override",
+        "state": {
+          "none": "None",
+          "charge": "Force charge",
+          "discharge": "Force discharge",
+          "hold": "Hold"
+        }
       }
     },
     "update": {
       "firmware": {
         "name": "Firmware update"
+      }
+    },
+    "text": {
+      "tou_peak_times": {
+        "name": "Peak-rate hours"
+      },
+      "tou_midpeak_times": {
+        "name": "Mid-rate hours"
+      },
+      "tou_offpeak_times": {
+        "name": "Off-peak hours"
+      }
+    },
+    "button": {
+      "check_updates": {
+        "name": "Check for updates"
       }
     }
   }

@@ -19,7 +19,10 @@ from .const import (
     BATTERY_POWER_DEADBAND_KW, BATTERY_STATUS_IDLE_KW
 )
 from .translations import translate_field_name, translate_status_value, SYSTEM_STATUS_OPTIONS
-from .extras import async_fetch_settings, async_fetch_slow_extras, async_fetch_pv_power
+from .extras import (
+    async_fetch_settings, async_fetch_slow_extras, async_fetch_pv_power,
+    async_fetch_battery_series,
+)
 import aiohttp
 import asyncio
 import json
@@ -506,6 +509,7 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                 today_str = now.strftime("%Y-%m-%d")
                 yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
+                state: EpCubeDataState = hass.data[DOMAIN][entry_id]["state"]
                 live_data = {}
                 total_data = {}
                 annual_data = {}
@@ -531,18 +535,19 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                         fetch_device_info(session, token, real_dev_id, region),
                         fetch_device_list(session, token, real_dev_id, region),
                         fetch_switch_mode(session, token, real_dev_id, region),
-                        async_fetch_settings(session, token, region, real_dev_id),
+                        async_fetch_settings(session, token, region, real_dev_id, state),
                         async_fetch_pv_power(session, token, region, real_dev_id),
                         async_fetch_slow_extras(
-                            session, token, region, real_dev_id, dev_id_sn,
-                            hass.data[DOMAIN][entry_id]["state"],
+                            session, token, region, real_dev_id, dev_id_sn, state,
                         ),
+                        async_fetch_battery_series(session, token, region, real_dev_id, state),
                         return_exceptions=True,
                     )
                     labels = (
                         "stats giornaliere", "stats totali", "stats annuali",
                         "stats mensili", "stats ieri", "device info",
                         "deviceList", "switch mode", "impostazioni", "stringhe FV", "extra",
+                        "serie batteria",
                     )
                     clean = []
                     for label, result in zip(labels, results):
@@ -563,6 +568,7 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                         settings_data,
                         pv_data,
                         extras_data,
+                        _series,
                     ) = clean
                 except Exception as e:
                     _LOGGER.warning("Errore nel fetch dati supplementari: %s", e)
@@ -631,7 +637,6 @@ async def async_update_data_with_stats(session, url, headers, dev_id_sn, token, 
                 battery_now = full_data.get("batterycurrentelectricity")
                 if battery_now is not None:
                     try:
-                        state: EpCubeDataState = hass.data[DOMAIN][entry_id]["state"]
                         state.update(float(battery_now))
                     except Exception as e:
                         _LOGGER.warning("Errore nel calcolo del SOC cumulativo: %s", e)
@@ -691,19 +696,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EpCubeYesterdayGridToSensor(coordinator),
         EpCubeYesterdaySolarSensor(coordinator),
         EpCubeYesterdayLoadSensor(coordinator),
-        # Sensori TOU (Tariffazione)
-        EpCubeTouScheduleSensor(coordinator, "peak"),
-        EpCubeTouScheduleSensor(coordinator, "midpeak"),
-        EpCubeTouScheduleSensor(coordinator, "offpeak"),
-        EpCubeTouScheduleSensor(coordinator, "daylight_peak"),
-        EpCubeTouScheduleSensor(coordinator, "daylight_midpeak"),
-        EpCubeTouScheduleSensor(coordinator, "daylight_offpeak"),
+        # Giorni della Tariffazione (le fasce si modificano dalle entità testo)
         EpCubeTouActiveWeeksSensor(coordinator, "workday"),
         EpCubeTouActiveWeeksSensor(coordinator, "non_workday"),
         # Endpoint dell'app Android (extras.py)
         EpCubeLastPowerCutSensor(coordinator),
-        EpCubeEarningSensor(coordinator, "earning_today"),
-        EpCubeEarningSensor(coordinator, "earning_month"),
         EpCubeWeatherSensor(coordinator),
         EpCubeAlertSensor(coordinator, "warnings", "last_warning"),
         EpCubeAlertSensor(coordinator, "faults", "last_fault"),
@@ -712,6 +709,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EpCubeAuthoritySensor(coordinator, "kebaAuthority"),
         EpCubeAuthoritySensor(coordinator, "eebusAuthority"),
         EpCubeAuthoritySensor(coordinator, "triphaseAuthority"),
+    ] + [
+        # Il server EU non ha earningsGraph (404): sensori sempre non disponibili
+        EpCubeEarningSensor(coordinator, key)
+        for key in ("earning_today", "earning_month")
+        if "/device/earningsGraph" not in hass.data[DOMAIN][entry.entry_id]["state"].unsupported
     ] + [
         EpCubePvStringSensor(coordinator, key)
         for key, value in sorted(((coordinator.data or {}).get("pv") or {}).items())
@@ -829,6 +831,46 @@ class EpCubeLastUpdateSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         return dt_util.utcnow()
 
+def _battery_state(coordinator) -> EpCubeDataState:
+    return coordinator.hass.data[DOMAIN][coordinator.config_entry.entry_id]["state"]
+
+
+def _battery_source(state_obj):
+    """Da dove arrivano carica e scarica: serie misurata o stima dal SoC."""
+    return "measured" if state_obj.series_mode else "estimated"
+
+
+def _series_today(state_obj, key):
+    series = state_obj.series
+    if series is None or series["day"] != date.today():
+        return None
+    return round(series[key], 3)
+
+
+def _series_attributes(state_obj, direction):
+    """Fonte dei valori e contabilità della serie, ripristinata al riavvio."""
+    attributes = {"source": _battery_source(state_obj)}
+    if state_obj.series_day is not None:
+        attributes["series_day"] = state_obj.series_day.isoformat()
+        attributes["series_seen"] = round(getattr(state_obj, f"series_seen_{direction}"), 4)
+    return attributes
+
+
+def _restore_series(state_obj, attributes, direction):
+    """Riprende la contabilità della serie: si somma solo ciò che non era già contato."""
+    day = attributes.get("series_day")
+    seen = attributes.get("series_seen")
+    if not day or seen is None:
+        return
+    try:
+        state_obj.series_day = date.fromisoformat(day)
+        setattr(state_obj, f"series_seen_{direction}", float(seen))
+    except (TypeError, ValueError):
+        return
+    state_obj.series_mode = True
+    state_obj.series_needs_baseline = False
+
+
 # Cumulativo totale: energia caricata nella batteria
 class EpCubeBatteryChargeSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
     def __init__(self, coordinator):
@@ -855,11 +897,16 @@ class EpCubeBatteryChargeSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
                 state_obj.total_in = float(last_state.state)
             except ValueError:
                 pass
+            _restore_series(state_obj, last_state.attributes, "in")
 
     @property
     def native_value(self):
         state_obj = self.coordinator.hass.data[DOMAIN][self.coordinator.config_entry.entry_id]["state"]
         return round(state_obj.total_in, 3)
+
+    @property
+    def extra_state_attributes(self):
+        return _series_attributes(_battery_state(self.coordinator), "in")
 
 
 # Cumulativo totale: energia scaricata dalla batteria
@@ -888,11 +935,16 @@ class EpCubeBatteryDischargeSensor(CoordinatorEntity, RestoreEntity, SensorEntit
                 state_obj.total_out = float(last_state.state)
             except ValueError:
                 pass
+            _restore_series(state_obj, last_state.attributes, "out")
 
     @property
     def native_value(self):
         state_obj = self.coordinator.hass.data[DOMAIN][self.coordinator.config_entry.entry_id]["state"]
         return round(state_obj.total_out, 3)
+
+    @property
+    def extra_state_attributes(self):
+        return _series_attributes(_battery_state(self.coordinator), "out")
 
 
 # Giornaliero: carica accumulata oggi
@@ -932,7 +984,13 @@ class EpCubeBatteryDailyChargeSensor(CoordinatorEntity, RestoreEntity, SensorEnt
     @property
     def native_value(self):
         state_obj = self.coordinator.hass.data[DOMAIN][self.coordinator.config_entry.entry_id]["state"]
+        if state_obj.series_mode:
+            return _series_today(state_obj, "charge")
         return round(state_obj.daily_in, 3)
+
+    @property
+    def extra_state_attributes(self):
+        return {"source": _battery_source(_battery_state(self.coordinator))}
 
 
 # Giornaliero: scarica erogata oggi
@@ -972,7 +1030,13 @@ class EpCubeBatteryDailyDischargeSensor(CoordinatorEntity, RestoreEntity, Sensor
     @property
     def native_value(self):
         state_obj = self.coordinator.hass.data[DOMAIN][self.coordinator.config_entry.entry_id]["state"]
+        if state_obj.series_mode:
+            return _series_today(state_obj, "discharge")
         return round(state_obj.daily_out, 3)
+
+    @property
+    def extra_state_attributes(self):
+        return {"source": _battery_source(_battery_state(self.coordinator))}
 
 class EpCubeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator):
@@ -1021,6 +1085,18 @@ class EpCubeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         )
 
         return value
+
+    @property
+    def extra_state_attributes(self):
+        # Potenza misurata dal gateway, media degli ultimi 5 minuti (serie):
+        # in ritardo fino a SERIES_INTERVAL, ma senza il rumore della stima
+        series = _battery_state(self.coordinator).series
+        last = series.get("last") if series else None
+        if not last:
+            return None
+        when, power_kw = last
+        # La serie è positiva in scarica: qui positivo vuol dire in carica
+        return {"measured_power_5min": round(-power_kw, 3), "measured_at": when}
 
 
 class EpCubeBatteryStatusSensor(CoordinatorEntity, SensorEntity):
@@ -1254,87 +1330,6 @@ class EpCubeYesterdayLoadSensor(CoordinatorEntity, SensorEntity):
         if backup is None and nonbackup is None:
             return None
         return round(float(backup or 0) + float(nonbackup or 0), 3)
-
-
-def _format_time_range(times_list):
-    """Fasce TOU "HH:MM_HH:MM_prezzo" in testo leggibile: "16:00-17:00 (0.31)".
-
-    Come l'app, le voci "00:00_00:00" sono segnaposto vuoti e vengono ignorate.
-    """
-    formatted = []
-    for interval in times_list or []:
-        parts = str(interval).split("_")
-        if len(parts) < 2 or not parts[0] or not parts[1]:
-            continue
-        if parts[0] == parts[1] == "00:00":
-            continue
-        price = parts[2] if len(parts) > 2 and parts[2] else None
-        formatted.append(f"{parts[0]}-{parts[1]}" + (f" ({price})" if price else ""))
-
-    return ", ".join(formatted) if formatted else "Non configurato"
-
-
-class EpCubeTouScheduleSensor(CoordinatorEntity, SensorEntity):
-    """Sensore che mostra gli orari TOU impostati."""
-    def __init__(self, coordinator, tou_type):
-        super().__init__(coordinator)
-        self.tou_type = tou_type
-        self.coordinator = coordinator
-        
-        # Mapping tipo TOU -> info
-        self.tou_info = {
-            "peak": {
-                "unique_id": "epcube_tou_peak_times",
-                "key": "peaktimelist",
-                "icon": "mdi:flash"
-            },
-            "midpeak": {
-                "unique_id": "epcube_tou_midpeak_times",
-                "key": "midpeaktimelist",
-                "icon": "mdi:flash-outline"
-            },
-            "offpeak": {
-                "unique_id": "epcube_tou_offpeak_times",
-                "key": "offpeaktimelist",
-                "icon": "mdi:moon-waxing-crescent"
-            },
-            "daylight_peak": {
-                "unique_id": "epcube_tou_daylight_peak_times",
-                "key": "daylightpeaktimelist",
-                "icon": "mdi:sun-clock"
-            },
-            "daylight_midpeak": {
-                "unique_id": "epcube_tou_daylight_midpeak_times",
-                "key": "daylightmidpeaktimelist",
-                "icon": "mdi:sun-clock-outline"
-            },
-            "daylight_offpeak": {
-                "unique_id": "epcube_tou_daylight_offpeak_times",
-                "key": "daylightoffpeaktimelist",
-                "icon": "mdi:moon-new"
-            }
-        }
-        
-        info = self.tou_info[tou_type]
-        self._attr_has_entity_name = True
-        self._attr_translation_key = info["unique_id"].removeprefix("epcube_")
-        self._attr_unique_id = info["unique_id"]
-        self._attr_icon = info["icon"]
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
-        self._attr_device_class = None
-        self._attr_device_info = {
-            "identifiers": {("epcube", "epcube_device")},
-            "name": "EPCUBE",
-            "manufacturer": "CanadianSolar",
-            "model": "EPCUBE",
-        }
-
-    @property
-    def native_value(self):
-        data = self.coordinator.data.get("data", {})
-        info = self.tou_info[self.tou_type]
-        times_list = data.get(info["key"], [])
-        return _format_time_range(times_list)
 
 
 class EpCubeTouActiveWeeksSensor(CoordinatorEntity, SensorEntity):

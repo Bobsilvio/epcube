@@ -95,18 +95,30 @@ def async_migrate_entry_identifiers(hass: HomeAssistant, entry: ConfigEntry) -> 
     # Il device legacy viene rinominato solo se appartiene a questa sola entry:
     # in un'installazione con due EP Cube è condiviso e va lasciato svuotare
     dev_reg = dr.async_get(hass)
-    legacy_device = dev_reg.async_get_device(identifiers={(DOMAIN, LEGACY_DEVICE_ID)})
+    legacy_device = _device_by_identifier(dev_reg, (DOMAIN, LEGACY_DEVICE_ID), entry.entry_id)
     if legacy_device is None:
         return
 
     if legacy_device.config_entries != {entry.entry_id}:
         return
 
-    if dev_reg.async_get_device(identifiers={(DOMAIN, sn)}) is not None:
+    if _device_by_identifier(dev_reg, (DOMAIN, sn), entry.entry_id) is not None:
         return
 
     dev_reg.async_update_device(legacy_device.id, new_identifiers={(DOMAIN, sn)})
     _LOGGER.info("Device legacy epcube_device migrato su %s", sn)
+
+
+def _device_by_identifier(dev_reg, identifier, entry_id):
+    """Device della entry con questo identificatore.
+
+    async_get_device è deprecato (gli identificatori non sono più unici tra
+    config entry); sulle versioni di HA senza il metodo nuovo si usa il vecchio.
+    """
+    lookup = getattr(dev_reg, "async_get_device_by_identifier", None)
+    if lookup is not None:
+        return lookup(identifier, entry_id)
+    return dev_reg.async_get_device(identifiers={identifier})
 
 
 def setting_value(coordinator, key):

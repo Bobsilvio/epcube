@@ -10,6 +10,9 @@ from .api import SETTING_WINTER_MODE, SETTING_SLEEP_MODE, SETTING_OFF_GRID_NOTIF
 from .payload import build_switch_mode_payload
 from .api import async_post_switch_mode
 from .const import DOMAIN, get_base_url
+from .tou import (
+    TOU_BANDS, async_save_band, band_slots, pending_prices, tou_list_price, tou_list_to_text, with_price,
+)
 
 import logging
 
@@ -26,13 +29,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EpCubeDynamicSocNumber(coordinator, entry),
         EpCubeStaticSocNumber(coordinator, entry, "selfconsumptioinreservesoc", "self_consumption_reserve_soc", 0, 100),
         EpCubeStaticSocNumber(coordinator, entry, "backuppowerreservesoc", "backup_reserve_soc", 50, 100),
-        # Number entities per TOU (Tariffazione)
-        EpCubeTouHourNumber(coordinator, entry, "peak_start", 0),
-        EpCubeTouHourNumber(coordinator, entry, "peak_end", 0),
-        EpCubeTouHourNumber(coordinator, entry, "midpeak_start", 0),
-        EpCubeTouHourNumber(coordinator, entry, "midpeak_end", 0),
-        EpCubeTouHourNumber(coordinator, entry, "offpeak_start", 0),
-        EpCubeTouHourNumber(coordinator, entry, "offpeak_end", 0),
+    ] + [
+        # Parametri dell'override batteria scelto dal menu "Override batteria"
+        EpCubeOverrideNumber(coordinator, entry, spec) for spec in OVERRIDE_NUMBERS
+    ] + [
+        # Prezzo di ogni tipo di fascia della Tariffazione (gli orari sono in text.py)
+        EpCubeTouPriceNumber(coordinator, entry, band) for band in TOU_BANDS
     ]
     # Prezzi target della tariffa dinamica (app EU), se il sistema li gestisce
     data = (coordinator.data or {}).get("data") or {}
@@ -188,139 +190,6 @@ class EpCubeStaticSocNumber(CoordinatorEntity, NumberEntity):
         if await async_post_switch_mode(self.hass, self.entry, payload, "SOC statico"):
             await self.coordinator.async_request_refresh()
 
-class EpCubeTouHourNumber(CoordinatorEntity, RestoreEntity, NumberEntity):
-    """Number entity per configurare gli orari TOU (Time of Use)."""
-
-    def __init__(self, coordinator, entry, hour_type, default_value):
-        super().__init__(coordinator)
-        self.entry = entry
-        self.coordinator = coordinator
-        self.region = entry.data.get("region", "EU")
-        self.base_url = get_base_url(self.region)
-        self.hour_type = hour_type
-        self._default_value = default_value
-
-        self.entity_description = NumberEntityDescription(
-            key=f"epcube_tou_{hour_type}",
-            translation_key=f"tou_{hour_type}",
-            icon="mdi:clock-outline",
-            entity_category=EntityCategory.CONFIG,
-        )
-        self._attr_has_entity_name = True
-        self._attr_unique_id = f"epcube_tou_{hour_type}_fix_range_v3"
-        self._attr_step = 1
-        self._attr_native_min_value = 0
-        # La fine di una fascia può essere 24:00 (fino a mezzanotte)
-        self._attr_native_max_value = 24 if hour_type.endswith("_end") else 23
-        self._attr_native_unit_of_measurement = None
-        self._attr_mode = "slider"
-        self._current_value = default_value
-        self._attr_device_info = {
-            "identifiers": {("epcube", "epcube_device")},
-            "name": "EPCUBE",
-            "manufacturer": "CanadianSolar",
-            "model": "EPCUBE",
-            "entry_type": "service",
-            "configuration_url": f"{self.base_url}/"
-        }
-
-    async def async_added_to_hass(self):
-        await super().async_added_to_hass()
-        last_state = await self.async_get_last_state()
-        if last_state is not None:
-            try:
-                self._current_value = int(float(last_state.state))
-            except (ValueError, TypeError):
-                self._current_value = self._default_value
-
-    @property
-    def available(self):
-        # Con i piani TOU stagionali l'app non usa le fasce: come lei, niente
-        return super().available and tou_slots_supported(self.coordinator, self.entry)
-
-    @property
-    def _list_key(self):
-        return TOU_HOUR_LISTS[self.hour_type.rsplit("_", 1)[0]]
-
-    @property
-    def _slots(self):
-        data = (self.coordinator.data or {}).get("data") or {}
-        return list(data.get(self._list_key.lower()) or [])
-
-    @property
-    def native_value(self):
-        # Ora della prima fascia reale del dispositivo; senza fasce resta
-        # l'ultimo valore scelto
-        slot = _first_tou_slot(self._slots)
-        if slot is not None:
-            start, end, _ = slot[1]
-            return int((start if self.hour_type.endswith("_start") else end).split(":")[0])
-        return self._current_value
-
-    async def async_set_native_value(self, value: float):
-        hour = max(0, min(int(self._attr_native_max_value), int(value)))
-        self._current_value = hour
-        slots = self._slots
-        found = _first_tou_slot(slots)
-
-        if found is not None:
-            index, (start, end, price) = found
-        else:
-            # Nessuna fascia: se ne crea una di un'ora a partire dal valore scelto
-            index, price = len(slots), ""
-            start, end = (f"{hour:02d}:00", f"{min(hour + 1, 24):02d}:00")
-            if self.hour_type.endswith("_end"):
-                start, end = f"{max(hour - 1, 0):02d}:00", f"{hour:02d}:00"
-            slots.append(None)
-
-        if self.hour_type.endswith("_start"):
-            start = f"{hour:02d}:00"
-        else:
-            end = f"{hour:02d}:00"
-        if start == end:
-            _LOGGER.warning("Fascia TOU %s di durata nulla (%s): non inviata", self._list_key, start)
-            self.async_write_ha_state()
-            return
-        slots[index] = f"{start}_{end}_{price}"
-
-        data = self.coordinator.data.get("data", {})
-        # onlySave=1: salva le fasce senza cambiare modalità; il resto della
-        # configurazione viene rispedito com'è
-        payload = build_switch_mode_payload(
-            data,
-            only_save="1",
-            current=self.coordinator.data.get("switch_mode"),
-            **{self._list_key: slots},
-        )
-        if await async_post_switch_mode(self.hass, self.entry, payload, f"TOU {self.hour_type}"):
-            await self.coordinator.async_request_refresh()
-        else:
-            self.async_write_ha_state()
-
-
-# Number TOU -> lista di switchMode
-TOU_HOUR_LISTS = {
-    "peak": "peakTimeList",
-    "midpeak": "midPeakTimeList",
-    "offpeak": "offPeakTimeList",
-}
-
-
-def _first_tou_slot(slots):
-    """(indice, (inizio, fine, prezzo)) della prima fascia reale, o None.
-
-    Come l'app, "00:00_00:00" è un segnaposto vuoto.
-    """
-    for index, slot in enumerate(slots):
-        parts = str(slot).split("_")
-        if len(parts) < 2 or not parts[0] or not parts[1]:
-            continue
-        if parts[0] == parts[1] == "00:00":
-            continue
-        return index, (parts[0], parts[1], parts[2] if len(parts) > 2 else "")
-    return None
-
-
 def _int_setting(coordinator, key, default):
     value = setting_value(coordinator, key)
     try:
@@ -456,3 +325,113 @@ class EpCubeDynamicPriceNumber(CoordinatorEntity, NumberEntity):
         )
         if await async_post_switch_mode(self.hass, self.entry, payload, f"{self._field}={value:g}"):
             await self.coordinator.async_request_refresh()
+
+
+# Valori usati dal menu "Override batteria": restano in Home Assistant, non sul
+# gateway. Durata 0 = finché non si torna su "Nessuno"
+OVERRIDE_NUMBERS = (
+    {"key": "override_target_soc", "setting": "target_soc", "min": 0, "max": 100,
+     "step": 5, "unit": "%", "icon": "mdi:battery-arrow-up"},
+    {"key": "override_duration", "setting": "duration", "min": 0, "max": 1440,
+     "step": 15, "unit": "min", "icon": "mdi:timer-outline"},
+)
+
+
+class EpCubeOverrideNumber(CoordinatorEntity, RestoreEntity, NumberEntity):
+    """SoC obiettivo e durata per il prossimo override scelto dal menu."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_mode = "box"
+
+    def __init__(self, coordinator, entry, spec):
+        super().__init__(coordinator)
+        self.entry = entry
+        self._setting = spec["setting"]
+        self._attr_translation_key = spec["key"]
+        self._attr_icon = spec["icon"]
+        self._attr_native_min_value = spec["min"]
+        self._attr_native_max_value = spec["max"]
+        self._attr_native_step = spec["step"]
+        self._attr_native_unit_of_measurement = spec["unit"]
+        self._attr_unique_id = f"epcube_{spec['key']}"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def _manager(self):
+        return self.hass.data[DOMAIN][self.entry.entry_id]["override"]
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            try:
+                self._manager.settings[self._setting] = int(float(last_state.state))
+            except (TypeError, ValueError):
+                pass
+
+    @property
+    def native_value(self):
+        return self._manager.settings[self._setting]
+
+    async def async_set_native_value(self, value):
+        self._manager.settings[self._setting] = int(value)
+        self.async_write_ha_state()
+
+
+class EpCubeTouPriceNumber(CoordinatorEntity, NumberEntity):
+    """Prezzo di un tipo di fascia della Tariffazione, uguale per tutte le sue fasce."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:currency-eur"
+    _attr_mode = "box"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 10
+    _attr_native_step = 0.001
+
+    def __init__(self, coordinator, entry, band):
+        super().__init__(coordinator)
+        self.entry = entry
+        self._band = band
+        self._attr_translation_key = f"tou_{band}_price"
+        self._attr_unique_id = f"epcube_tou_{band}_price"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def available(self):
+        return super().available and tou_slots_supported(self.coordinator, self.entry)
+
+    @property
+    def native_unit_of_measurement(self):
+        unit = ((self.coordinator.data or {}).get("data") or {}).get("unitdefault")
+        return f"{unit}/kWh" if isinstance(unit, str) and unit else None
+
+    @property
+    def native_value(self):
+        price = tou_list_price(band_slots(self.coordinator, self._band))
+        if price is None:
+            price = pending_prices(self.hass, self.entry).get(self._band)
+        return price
+
+    async def async_set_native_value(self, value):
+        slots = band_slots(self.coordinator, self._band)
+        pending_prices(self.hass, self.entry)[self._band] = value
+        if tou_list_to_text(slots):
+            await async_save_band(
+                self.hass, self.entry, self.coordinator, self._band,
+                with_price(self.name or self._band, slots, value),
+            )
+        else:
+            # Ancora nessun orario: il prezzo si applica quando li scrivi
+            self.async_write_ha_state()

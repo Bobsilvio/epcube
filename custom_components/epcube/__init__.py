@@ -12,17 +12,22 @@ from .payload import build_switch_mode_payload
 from .entity import tou_slots_supported
 from .auth import async_refresh_token, has_credentials, InvalidCredentials
 from .wallbox import async_check_wallbox_support
+from .override import OverrideManager, CHARGE, DISCHARGE, HOLD
+from .tou import normalize_tou_list
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from datetime import timedelta, datetime
 import logging
-import re
 
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_SET_TOU_SCHEDULE = "set_tou_schedule"
 SERVICE_SET_OPERATING_MODE = "set_operating_mode"
 SERVICE_CHECK_WALLBOX_SUPPORT = "check_wallbox_support"
+SERVICE_FORCE_CHARGE = "force_charge"
+SERVICE_FORCE_DISCHARGE = "force_discharge"
+SERVICE_HOLD_BATTERY = "hold_battery"
+SERVICE_CLEAR_BATTERY_OVERRIDE = "clear_battery_override"
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if DOMAIN not in hass.data:
@@ -85,6 +90,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     await coordinator.async_refresh()
 
+    override = OverrideManager(hass, entry, coordinator)
+    hass.data[DOMAIN][entry.entry_id]["override"] = override
+    await override.async_load()
+
     # unique_id e device per-impianto: migra le installazioni pre-1.6.0 prima
     # di creare le entità, così entity_id e storico restano invariati (#25)
     async_migrate_entry_identifiers(hass, entry)
@@ -122,7 +131,62 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         supports_response=SupportsResponse.ONLY,
     )
 
+    # Override temporanei della batteria (riserva di Autoconsumo)
+    async def handle_force_charge(call):
+        await _override(hass, call).async_start(
+            CHARGE, target_soc=_target_soc(call), duration=_duration(call)
+        )
+
+    async def handle_force_discharge(call):
+        await _override(hass, call).async_start(
+            DISCHARGE, target_soc=_target_soc(call), duration=_duration(call)
+        )
+
+    async def handle_hold_battery(call):
+        await _override(hass, call).async_start(HOLD, duration=_duration(call))
+
+    async def handle_clear_battery_override(call):
+        await _override(hass, call).async_clear()
+
+    for name, handler in (
+        (SERVICE_FORCE_CHARGE, handle_force_charge),
+        (SERVICE_FORCE_DISCHARGE, handle_force_discharge),
+        (SERVICE_HOLD_BATTERY, handle_hold_battery),
+        (SERVICE_CLEAR_BATTERY_OVERRIDE, handle_clear_battery_override),
+    ):
+        hass.services.async_register(DOMAIN, name, handler)
+
     return True
+
+
+def _override(hass, call):
+    _get_entry_coordinator(hass, call.data.get("entry_id"))
+    entry_id = call.data.get("entry_id") or next(iter(hass.data[DOMAIN]))
+    return hass.data[DOMAIN][entry_id]["override"]
+
+
+def _target_soc(call):
+    try:
+        soc = int(call.data["target_soc"])
+    except (KeyError, TypeError, ValueError) as err:
+        raise ServiceValidationError("target_soc deve essere un numero tra 0 e 100") from err
+    if not 0 <= soc <= 100:
+        raise ServiceValidationError("target_soc deve essere tra 0 e 100")
+    return soc
+
+
+def _duration(call):
+    """Durata in minuti; assente = finché non si chiama clear_battery_override."""
+    minutes = call.data.get("duration")
+    if minutes in (None, "", 0):
+        return None
+    try:
+        minutes = float(minutes)
+    except (TypeError, ValueError) as err:
+        raise ServiceValidationError("duration è in minuti") from err
+    if minutes <= 0:
+        raise ServiceValidationError("duration deve essere positiva")
+    return timedelta(minutes=minutes)
 
 
 async def async_check_wallbox(hass: HomeAssistant, call) -> ServiceResponse:
@@ -141,7 +205,9 @@ async def async_check_wallbox(hass: HomeAssistant, call) -> ServiceResponse:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+        override = hass.data[DOMAIN][entry.entry_id].get("override")
+        if override:
+            override.async_unload()
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unload_ok
 
@@ -289,42 +355,3 @@ TOU_LIST_PARAMS = {
     "daylight_mid_peak_times": "dayLightMidPeakTimeList",
     "daylight_off_peak_times": "dayLightOffPeakTimeList",
 }
-
-# L'editor TOU dell'app accetta fino a 3 fasce per tipo
-MAX_TOU_SLOTS = 3
-
-_TOU_ENTRY = re.compile(r"^(\d{1,2}):(\d{2})_(\d{1,2}):(\d{2})(?:_(.*))?$")
-
-
-def normalize_tou_list(name, entries):
-    """Fasce "HH:MM_HH:MM_prezzo" nel formato dell'app.
-
-    Come l'app: orari a due cifre, prezzo col punto decimale e senza punto
-    finale ("0,30" -> "0.30", "1." -> "1"), prezzo vuoto ammesso.
-    """
-    entries = list(entries or [])
-    if len(entries) > MAX_TOU_SLOTS:
-        raise ServiceValidationError(
-            f"{name}: al massimo {MAX_TOU_SLOTS} fasce, come nell'app EP Cube"
-        )
-    normalized = []
-    for entry in entries:
-        match = _TOU_ENTRY.match(str(entry).strip())
-        if not match:
-            raise ServiceValidationError(
-                f"Fascia TOU non valida in {name}: '{entry}'. "
-                "Formato richiesto: 'HH:MM_HH:MM_prezzo' (es. '08:00_12:00_0.31')"
-            )
-        h1, m1, h2, m2, price = match.groups()
-        if int(h1) > 24 or int(h2) > 24 or int(m1) > 59 or int(m2) > 59:
-            raise ServiceValidationError(f"Orario non valido in {name}: '{entry}'")
-        price = (price or "").strip().replace(",", ".").rstrip(".")
-        if price:
-            try:
-                float(price)
-            except ValueError as err:
-                raise ServiceValidationError(
-                    f"Prezzo non valido in {name}: '{entry}'"
-                ) from err
-        normalized.append(f"{int(h1):02d}:{m1}_{int(h2):02d}:{m2}_{price}")
-    return normalized

@@ -6,6 +6,7 @@ from .payload import build_switch_mode_payload
 from .api import async_post_switch_mode
 from .const import DOMAIN
 from .translations import OPERATION_MODES
+from .override import CHARGE, DISCHARGE, HOLD
 
 from homeassistant.exceptions import HomeAssistantError
 
@@ -32,7 +33,10 @@ def _dynamic_available(data):
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    entities = [EpCubeModeSelect(coordinator, entry)]
+    entities = [
+        EpCubeModeSelect(coordinator, entry),
+        EpCubeBatteryOverrideSelect(coordinator, entry),
+    ]
     bind_entities_to_entry(entities, entry)
     async_add_entities(entities, True)
 
@@ -102,3 +106,56 @@ class EpCubeModeSelect(CoordinatorEntity, SelectEntity):
         if not await async_post_switch_mode(self.hass, self.entry, payload, f"modalità {option}"):
             raise HomeAssistantError(f"Il server EP Cube ha rifiutato la modalità {option}")
         await self.coordinator.async_request_refresh()
+
+
+OVERRIDE_NONE = "none"
+
+
+class EpCubeBatteryOverrideSelect(CoordinatorEntity, SelectEntity):
+    """Override batteria: sceglierlo lo avvia, "Nessuno" lo annulla.
+
+    SoC e durata vengono dai number "SoC obiettivo override" e "Durata override".
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "battery_override"
+    _attr_icon = "mdi:battery-sync"
+    _attr_options = [OVERRIDE_NONE, CHARGE, DISCHARGE, HOLD]
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self.entry = entry
+        self._attr_unique_id = "epcube_battery_override_select"
+        self._attr_device_info = {
+            "identifiers": {("epcube", "epcube_device")},
+            "name": "EPCUBE",
+            "manufacturer": "CanadianSolar",
+            "model": "EPCUBE",
+        }
+
+    @property
+    def _manager(self):
+        return self.hass.data[DOMAIN][self.entry.entry_id]["override"]
+
+    @property
+    def current_option(self):
+        active = self._manager.active
+        return active.kind if active else OVERRIDE_NONE
+
+    @property
+    def extra_state_attributes(self):
+        active = self._manager.active
+        if active is None:
+            return None
+        return {
+            "target_soc": active.target_soc,
+            "ends_at": active.ends_at.isoformat() if active.ends_at else None,
+            "previous_reserve": active.previous_reserve,
+        }
+
+    async def async_select_option(self, option: str):
+        if option == OVERRIDE_NONE:
+            await self._manager.async_clear()
+        else:
+            await self._manager.async_start_from_settings(option)
+        self.async_write_ha_state()

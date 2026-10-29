@@ -1349,24 +1349,6 @@
       "total_load_energy": {
         "name": "Energia consumo totale (oggi)"
       },
-      "tou_peak_times": {
-        "name": "Fascia costo alto"
-      },
-      "tou_midpeak_times": {
-        "name": "Fascia costo normale"
-      },
-      "tou_offpeak_times": {
-        "name": "Fascia costo basso"
-      },
-      "tou_daylight_peak_times": {
-        "name": "Fascia costo alto (ora legale)"
-      },
-      "tou_daylight_midpeak_times": {
-        "name": "Fascia costo normale (ora legale)"
-      },
-      "tou_daylight_offpeak_times": {
-        "name": "Fascia costo basso (ora legale)"
-      },
       "tou_active_week": {
         "name": "Giorni lavorativi TOU"
       },
@@ -1511,24 +1493,6 @@
       "backup_reserve_soc": {
         "name": "Riserva SOC back-up"
       },
-      "tou_peak_start": {
-        "name": "Fascia costo alto inizio (HH:00)"
-      },
-      "tou_peak_end": {
-        "name": "Fascia costo alto fine (HH:00)"
-      },
-      "tou_midpeak_start": {
-        "name": "Fascia costo normale inizio (HH:00)"
-      },
-      "tou_midpeak_end": {
-        "name": "Fascia costo normale fine (HH:00)"
-      },
-      "tou_offpeak_start": {
-        "name": "Fascia costo basso inizio (HH:00)"
-      },
-      "tou_offpeak_end": {
-        "name": "Fascia costo basso fine (HH:00)"
-      },
       "sleep_mode_soc": {
         "name": "SoC sleep mode"
       },
@@ -1543,16 +1507,56 @@
       },
       "dynamic_discharge_price": {
         "name": "Prezzo target di vendita"
+      },
+      "override_target_soc": {
+        "name": "SoC obiettivo override"
+      },
+      "override_duration": {
+        "name": "Durata override"
+      },
+      "tou_peak_price": {
+        "name": "Prezzo costo alto"
+      },
+      "tou_midpeak_price": {
+        "name": "Prezzo costo normale"
+      },
+      "tou_offpeak_price": {
+        "name": "Prezzo costo basso"
       }
     },
     "select": {
       "operating_mode": {
         "name": "Modalità"
+      },
+      "battery_override": {
+        "name": "Override batteria",
+        "state": {
+          "none": "Nessuno",
+          "charge": "Forza carica",
+          "discharge": "Forza scarica",
+          "hold": "Mantieni"
+        }
       }
     },
     "update": {
       "firmware": {
         "name": "Aggiornamento firmware"
+      }
+    },
+    "text": {
+      "tou_peak_times": {
+        "name": "Orari costo alto"
+      },
+      "tou_midpeak_times": {
+        "name": "Orari costo normale"
+      },
+      "tou_offpeak_times": {
+        "name": "Orari costo basso"
+      }
+    },
+    "button": {
+      "check_updates": {
+        "name": "Controlla aggiornamenti"
       }
     }
   }

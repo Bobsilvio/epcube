@@ -7,8 +7,9 @@ from .entity import (
 )
 from .payload import build_switch_mode_payload
 from .extras import has_winter_mode
+from homeassistant.exceptions import HomeAssistantError
 from .api import (
-    async_post_switch_mode, async_set_winter_protect, WINTER_PROTECT_ON,
+    async_post_switch_mode, async_read_switch_mode_field, async_set_winter_protect, WINTER_PROTECT_ON,
     SETTING_ALLOW_CHARGING, SETTING_WEATHER_WATCH, SETTING_WINTER_MODE,
     SETTING_OFF_GRID_NOTIFICATION, SETTING_INDICATOR_LIGHT, SETTING_AUTO_UPDATE,
 )
@@ -96,8 +97,20 @@ class EpCubeAllowChargingFromGridSwitch(CoordinatorEntity, SwitchEntity):
             data, only_save="1", current=self.coordinator.data.get("switch_mode"),
             allowChargingXiaGrid=value,
         )
-        if await async_post_switch_mode(self.hass, self.entry, payload, f"allowChargingXiaGrid={value}"):
-            await self.coordinator.async_request_refresh()
+        if not await async_post_switch_mode(self.hass, self.entry, payload, f"allowChargingXiaGrid={value}"):
+            raise HomeAssistantError("Il server EP Cube ha rifiutato la modifica (vedi log)")
+        # Su alcuni firmware il campo è bloccato (di solito dall'installatore):
+        # il server risponde "Success" ma il valore non cambia
+        applied = await async_read_switch_mode_field(
+            self.hass, self.entry, data["devid"], "allowChargingXiaGrid"
+        )
+        await self.coordinator.async_request_refresh()
+        if applied is not None and str(applied) != value:
+            raise HomeAssistantError(
+                "Il gateway ha accettato la richiesta ma la ricarica da rete non è "
+                "cambiata: su questo impianto l'impostazione è bloccata "
+                "(di solito la sblocca solo l'installatore)"
+            )
 
 
 def _soc(coordinator, key, default):

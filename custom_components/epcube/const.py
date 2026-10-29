@@ -1,6 +1,6 @@
 DOMAIN = "epcube"
 DEFAULT_SCAN_INTERVAL = 5
-PLATFORMS = ["sensor", "binary_sensor", "select", "number", "switch", "update"]
+PLATFORMS = ["sensor", "binary_sensor", "select", "number", "switch", "update", "text", "button"]
 
 CONF_SCALE_POWER = "scale_power"
 

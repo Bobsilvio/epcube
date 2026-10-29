@@ -17,9 +17,9 @@ from .entity import bind_entities_to_entry
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    entities = [EpCubeFirmwareUpdate(coordinator)]
+    entities = [EpCubeFirmwareUpdate(coordinator, entry)]
     bind_entities_to_entry(entities, entry)
-    async_add_entities(entities, True)
+    async_add_entities(entities)
 
 
 class EpCubeFirmwareUpdate(CoordinatorEntity, UpdateEntity):
@@ -32,8 +32,9 @@ class EpCubeFirmwareUpdate(CoordinatorEntity, UpdateEntity):
     _attr_supported_features = UpdateEntityFeature(0)
     _attr_icon = "mdi:cube-outline"
 
-    def __init__(self, coordinator):
+    def __init__(self, coordinator, entry):
         super().__init__(coordinator)
+        self.entry = entry
         self._attr_unique_id = "epcube_firmware_update"
         self._attr_device_info = {
             "identifiers": {("epcube", "epcube_device")},
@@ -41,6 +42,11 @@ class EpCubeFirmwareUpdate(CoordinatorEntity, UpdateEntity):
             "manufacturer": "CanadianSolar",
             "model": "EPCUBE",
         }
+
+    async def async_update(self):
+        """"Controlla aggiornamenti" di Home Assistant: rilegge subito, senza cache."""
+        self.hass.data[DOMAIN][self.entry.entry_id]["state"].extras_at = 0.0
+        await self.coordinator.async_refresh()
 
     def _extras(self):
         return (self.coordinator.data or {}).get("extras") or {}

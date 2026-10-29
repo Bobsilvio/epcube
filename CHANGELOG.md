@@ -1,5 +1,68 @@
 # Changelog
 
+## v1.8.0
+
+### Changed
+- **Measured battery charge and discharge**: today's charge and discharge now
+  come from the battery power measured by the gateway (5-minute series of
+  `queryDataGraphV2`, read every 10 minutes) instead of being estimated from
+  the change in stored energy. The estimate missed conversion losses and short
+  swings between two readings; on a test day it read 6.65/10.43 kWh against a
+  measured 7.57/11.94 kWh. The lifetime totals (**Total Energy Stored /
+  Discharged**) keep their history and continue from the measured values; a
+  restart or a day spent offline is caught up from the cloud without double
+  counting. Where the series is not available the old estimate is still used.
+  Each sensor reports its `source` (`measured` or `estimated`).
+- **Battery Power** gains a `measured_power_5min` attribute: the gateway's own
+  reading for the last complete 5-minute interval.
+- **Endpoints the server does not have are no longer polled**: an endpoint that
+  answers 404 is skipped until the next reload. On the EU server this stops a
+  useless `getSettingsData` call every update, and the earnings sensors
+  (`earningsGraph`, always unavailable there) are no longer created.
+- **Allow charging via grid** reads the setting back after writing it. Some
+  systems accept the request but ignore it (installer lock): the switch now
+  reports an error instead of looking successful.
+- **Time of use windows from the device page**: for peak, mid and off-peak
+  there is a text box with the weekday hours (`08:00-13:00, 20:00-23:00`,
+  checked by Home Assistant before saving) and a number with the price shared
+  by those windows. They replace the six hour sliders, which only changed the
+  whole hour of the first window and could not set a price, and the read-only
+  window sensors.
+- **README** rewritten: shorter, with how often each value updates, step-by-step
+  Time of use and override setup, and which sensors to use in the Energy
+  dashboard.
+
+### Fixed
+- Replaced the device registry lookup that Home Assistant deprecates for 2027.8.
+
+### Added
+- **Battery overrides**: `epcube.force_charge`, `epcube.force_discharge`,
+  `epcube.hold_battery` and `epcube.clear_battery_override`. They move the
+  self-consumption reserve for a duration and restore the previous one when it
+  ends, even across a Home Assistant restart (retried every 5 minutes if the
+  restore fails).
+- **Battery override** menu to do the same from the device page: pick Force
+  charge, Force discharge, Hold or None, with **Override target SoC** and
+  **Override duration** (0 = until cancelled).
+- **Check for updates** button: reads firmware, warnings, outages and weather
+  right away instead of waiting up to 15 minutes. Home Assistant's own "Check
+  for updates" does the same for the firmware entity.
+
+## v1.7.1
+
+### Fixed
+- Per-string PV current and voltage had the name and unit of power
+  ("PV1current" in kW). They now have their own names, units and device class.
+  Old long-term statistics in kW for those sensors can be cleared from
+  Developer tools → Statistics.
+- Battery charge/discharge statistics sensors showed the raw API key as name.
+- Last warning / last fault showed "unknown" when there is none.
+
+### Added
+- **Firmware update** entity (notification only, install from the app) and
+  disabled-by-default diagnostic sensors for the EV charger, EEBus and
+  three-phase permissions.
+
 ## v1.7.0
 
 ### Added

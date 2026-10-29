@@ -228,3 +228,98 @@ check_wallbox_support:
       default: false
       selector:
         boolean:
+
+force_charge:
+  name: Forza carica batteria
+  description: >
+    Alza la riserva di Autoconsumo al SoC indicato: la batteria smette di
+    scaricarsi e si ricarica col solare in eccesso fino a quel livello.
+    Non carica dalla rete. Alla scadenza torna la riserva di prima.
+    Funziona solo in modalità Autoconsumo.
+  fields:
+    entry_id:
+      name: ID Entry
+      description: ID della configurazione epcube (opzionale, usa la prima se non specificato)
+      required: false
+    target_soc:
+      name: SoC obiettivo
+      description: Livello a cui portare la riserva
+      required: true
+      example: "80"
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    duration:
+      name: Durata
+      description: Minuti; lascia vuoto per tenerlo finché non lo annulli
+      required: false
+      example: "120"
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: min
+
+force_discharge:
+  name: Forza scarica batteria
+  description: >
+    Abbassa la riserva di Autoconsumo al SoC indicato: la batteria può
+    alimentare la casa fino a quel livello. Alla scadenza torna la riserva
+    di prima. Funziona solo in modalità Autoconsumo.
+  fields:
+    entry_id:
+      name: ID Entry
+      description: ID della configurazione epcube (opzionale, usa la prima se non specificato)
+      required: false
+    target_soc:
+      name: SoC minimo
+      description: Livello sotto cui la batteria non scende
+      required: true
+      example: "20"
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    duration:
+      name: Durata
+      description: Minuti; lascia vuoto per tenerlo finché non lo annulli
+      required: false
+      example: "120"
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: min
+
+hold_battery:
+  name: Mantieni batteria
+  description: >
+    Fissa la riserva di Autoconsumo al SoC attuale: la batteria non si scarica.
+    Alla scadenza torna la riserva di prima. Funziona solo in modalità Autoconsumo.
+  fields:
+    entry_id:
+      name: ID Entry
+      description: ID della configurazione epcube (opzionale, usa la prima se non specificato)
+      required: false
+    duration:
+      name: Durata
+      description: Minuti; lascia vuoto per tenerlo finché non lo annulli
+      required: false
+      example: "60"
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: min
+
+clear_battery_override:
+  name: Annulla override batteria
+  description: Termina subito forza carica / forza scarica / mantieni e rimette la riserva di prima.
+  fields:
+    entry_id:
+      name: ID Entry
+      description: ID della configurazione epcube (opzionale, usa la prima se non specificato)
+      required: false

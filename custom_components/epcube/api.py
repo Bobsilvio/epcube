@@ -11,6 +11,7 @@ from .const import (
 )
 
 from .auth import async_refresh_token, InvalidCredentials
+from .extras import async_fetch_api_data
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 import aiohttp
@@ -43,6 +44,25 @@ SETTING_ALLOW_CHARGING = "10"
 async def async_post_switch_mode(hass, entry, payload, label="switchMode"):
     """Invia un payload a /device/switchMode. True se il server ha accettato."""
     return await _async_post(hass, entry, "/device/switchMode", payload, label)
+
+
+# Attesa prima di rileggere getSwitchMode dopo una scrittura
+SWITCH_MODE_SETTLE = 3  # seconds
+
+
+async def async_read_switch_mode_field(hass, entry, dev_id, field):
+    """Rilegge un campo di getSwitchMode dopo una scrittura, None se non leggibile.
+
+    Il server risponde "Success" anche ai campi che il gateway poi ignora:
+    rileggere è l'unico modo per sapere se il valore è stato preso.
+    """
+    await asyncio.sleep(SWITCH_MODE_SETTLE)
+    region = entry.options.get("region") or entry.data.get("region", "EU")
+    data = await async_fetch_api_data(
+        async_get_clientsession(hass), entry_token(entry), region,
+        f"/device/getSwitchMode?devId={dev_id}",
+    )
+    return data.get(field) if isinstance(data, dict) else None
 
 
 async def async_save_settings(hass, entry, dev_id, setting_type, fields, label=None):
